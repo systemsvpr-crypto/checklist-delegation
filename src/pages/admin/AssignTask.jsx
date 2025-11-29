@@ -176,7 +176,7 @@ export default function AssignTask() {
     givenBy: "",
     doer: "",
     description: "",
-    frequency: "daily",
+    frequency: "one-time",
     enableReminders: true,
     requireAttachment: false,
   });
@@ -673,7 +673,7 @@ export default function AssignTask() {
       const tasksData = generatedTasks.map((task, index) => ({
         timestamp: getCurrentTimestamp(), // FIXED: Use current timestamp with actual time
         taskId: (nextTaskId + index).toString(),
-        firm: task.department,                    // Maps to Column C
+        department: task.department,                  // Maps to Column C
         givenBy: task.givenBy,                    // Maps to Column D
         name: task.doer,                          // Maps to Column E
         description: task.description,            // Maps to Column F
@@ -708,7 +708,7 @@ export default function AssignTask() {
         givenBy: "",
         doer: "",
         description: "",
-        frequency: "daily",
+        frequency: "one-time",
         enableReminders: true,
         requireAttachment: false
       });
@@ -1102,7 +1102,7 @@ export default function AssignTask() {
                     givenBy: "",
                     doer: "",
                     description: "",
-                    frequency: "daily",
+                    frequency: "One Time (No Recurrence)",
                     enableReminders: true,
                     requireAttachment: false,
                   });

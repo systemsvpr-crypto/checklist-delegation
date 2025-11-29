@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo,useRef  } from "react";
 import {
   CheckCircle2,
   Upload,
@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Filter,
   ChevronDown,
+  Camera,
 } from "lucide-react";
 import AdminLayout from "../components/layout/AdminLayout";
 
@@ -79,6 +80,195 @@ function DelegationDataPage() {
 
   // Debounced search term for better performance
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+const [cameraStream, setCameraStream] = useState(null);
+const [cameraError, setCameraError] = useState("");
+const [isCameraLoading, setIsCameraLoading] = useState(false);
+const [currentCaptureId, setCurrentCaptureId] = useState(null);
+
+
+// Add these refs
+const videoRef = useRef(null);
+const canvasRef = useRef(null);
+
+// Add camera cleanup useEffect (after other useEffects)
+useEffect(() => {
+  return () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+  };
+}, [cameraStream]);
+
+// Add these camera functions (after other functions, before handleSubmit)
+const startCamera = async () => {
+  try {
+    setCameraError("");
+    setIsCameraLoading(true);
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError("Camera not supported on this device");
+      setIsCameraLoading(false);
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+
+    setCameraStream(stream);
+    setIsCameraOpen(true);
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+
+      await new Promise((resolve, reject) => {
+        const video = videoRef.current;
+        if (!video) {
+          reject(new Error("Video ref lost"));
+          return;
+        }
+
+        let metadataLoaded = false;
+        let canPlay = false;
+
+        const checkReady = () => {
+          if (metadataLoaded && canPlay) {
+            resolve();
+          }
+        };
+
+        video.onloadedmetadata = () => {
+          metadataLoaded = true;
+          checkReady();
+        };
+
+        video.oncanplay = () => {
+          canPlay = true;
+          checkReady();
+        };
+
+        video.onerror = (err) => {
+          reject(err);
+        };
+
+        setTimeout(() => {
+          if (!metadataLoaded || !canPlay) {
+            reject(new Error("Video initialization timeout"));
+          }
+        }, 10000);
+      });
+
+      await videoRef.current.play();
+    }
+
+  } catch (error) {
+    console.error("Camera error:", error);
+
+    if (error.name === 'NotAllowedError') {
+      setCameraError("Camera access denied. Please allow camera permissions.");
+    } else if (error.name === 'NotFoundError') {
+      setCameraError("No camera found on this device.");
+    } else if (error.name === 'NotReadableError') {
+      setCameraError("Camera is being used by another application.");
+    } else {
+      setCameraError("Unable to access camera: " + error.message);
+    }
+  } finally {
+    setIsCameraLoading(false);
+  }
+};
+
+const stopCamera = () => {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => {
+      track.stop();
+    });
+    setCameraStream(null);
+  }
+
+  if (videoRef.current) {
+    videoRef.current.srcObject = null;
+  }
+
+  setIsCameraOpen(false);
+  setCameraError("");
+  setIsCameraLoading(false);
+  setCurrentCaptureId(null);
+};
+
+const capturePhoto = async () => {
+  if (!videoRef.current || !currentCaptureId) {
+    alert("Camera not initialized. Please try again.");
+    return;
+  }
+
+  const video = videoRef.current;
+
+  try {
+    if (video.readyState < 2) {
+      alert("Camera is still loading. Please wait a moment and try again.");
+      return;
+    }
+
+    if (!video.videoWidth || !video.videoHeight) {
+      alert("Camera dimensions not available. Please restart camera.");
+      return;
+    }
+
+    if (!cameraStream || !cameraStream.active) {
+      alert("Camera stream not active. Please restart camera.");
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      alert("Failed to create canvas context");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("Failed to create blob"));
+          }
+        },
+        'image/jpeg',
+        0.92
+      );
+    });
+
+    const file = new File(
+      [blob],
+      `camera-${Date.now()}.jpg`,
+      { type: 'image/jpeg' }
+    );
+
+    stopCamera();
+
+    handleImageUpload(currentCaptureId, { target: { files: [file] } });
+
+    alert("✅ Photo captured successfully!");
+
+  } catch (error) {
+    console.error("❌ Capture error:", error);
+    alert("Failed to capture photo: " + error.message);
+  }
+};
 
   // NEW: Function to format date to DD/MM/YYYY HH:MM:SS
   const formatDateTimeToDDMMYYYY = useCallback((date) => {
@@ -1131,157 +1321,179 @@ function DelegationDataPage() {
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <h1 className="text-2xl font-bold tracking-tight text-purple-700">
-            {showHistory
-              ? CONFIG.PAGE_CONFIG.historyTitle
-              : CONFIG.PAGE_CONFIG.title}
-          </h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
-          <div className="flex flex-wrap gap-2 sm:space-x-4">
-            <div className="relative w-full sm:w-auto">
-              <Search
-                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                size={18}
-              />
-              <input
-                type="text"
-                placeholder={
-                  showHistory ? "Search by Task ID..." : "Search tasks..."
-                }
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full sm:w-64 pl-10 pr-4 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
+  {/* PAGE TITLE */}
+  <h1 className="text-2xl font-bold tracking-tight text-purple-700 text-center sm:text-left">
+    {showHistory ? CONFIG.PAGE_CONFIG.historyTitle : CONFIG.PAGE_CONFIG.title}
+  </h1>
+
+  {/* SEARCH + FILTER + BUTTONS WRAPPER */}
+  <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4">
+
+    {/* SEARCH BOX */}
+    <div className="relative w-full sm:w-64">
+      <Search
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+        size={18}
+      />
+      <input
+        type="text"
+        placeholder={showHistory ? "Search by Task ID..." : "Search tasks..."}
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full pl-10 pr-4 py-2 border border-purple-200 rounded-md 
+                   focus:outline-none focus:ring-2 focus:ring-purple-500"
+      />
+    </div>
+
+    {/* ADMIN FILTERS */}
+    {userRole === "admin" && !showHistory && (
+      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
+
+        {/* NAME FILTER */}
+        <div className="relative w-full sm:w-auto">
+          <button
+            onClick={() => toggleDropdown("name")}
+            className="flex items-center justify-between gap-2 w-full px-3 py-2 border border-purple-200
+                       rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Filter className="h-4 w-4" />
+            {nameFilter || "Filter by Name"}
+            <ChevronDown
+              size={16}
+              className={`transition-transform ${
+                dropdownOpen.name ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+
+          {dropdownOpen.name && (
+            <div className="absolute z-50 mt-1 w-full sm:w-56 rounded-md bg-white shadow-lg 
+                            border border-gray-200 max-h-60 overflow-auto">
+              <div className="py-1">
+                <button
+                  onClick={clearNameFilter}
+                  className={`block w-full text-left px-4 py-2 text-sm ${
+                    !nameFilter
+                      ? "bg-purple-100 text-purple-900"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  All Names
+                </button>
+
+                {allNames.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => handleNameFilterSelect(name)}
+                    className={`block w-full text-left px-4 py-2 text-sm ${
+                      nameFilter === name
+                        ? "bg-purple-100 text-purple-900"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
             </div>
-
-            {/* Admin-only filters */}
-            {userRole === "admin" && !showHistory && (
-              <>
-                <div className="relative w-full sm:w-auto">
-                  <button
-                    onClick={() => toggleDropdown("name")}
-                    className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto px-1 py-4 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Filter className="h-4 w-4" />
-                    {nameFilter || "Filter by Name"}
-                    <ChevronDown
-                      size={16}
-                      className={`transition-transform ${
-                        dropdownOpen.name ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-                  {dropdownOpen.name && (
-                    <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
-                      <div className="py-1">
-                        <button
-                          onClick={clearNameFilter}
-                          className={`block w-full text-left px-4 py-2 text-sm ${
-                            !nameFilter
-                              ? "bg-purple-100 text-purple-900"
-                              : "text-gray-700 hover:bg-gray-100"
-                          }`}
-                        >
-                          All Names
-                        </button>
-                        {allNames.map((name) => (
-                          <button
-                            key={name}
-                            onClick={() => handleNameFilterSelect(name)}
-                            className={`block w-full text-left px-4 py-2 text-sm ${
-                              nameFilter === name
-                                ? "bg-purple-100 text-purple-900"
-                                : "text-gray-700 hover:bg-gray-100"
-                            }`}
-                          >
-                            {name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative w-full sm:w-auto">
-                  <button
-                    onClick={() => toggleDropdown("department")}
-                    className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto px-1 py-4 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Filter className="h-4 w-4" />
-                    {departmentFilter || "Filter by Department"}
-                    <ChevronDown
-                      size={16}
-                      className={`transition-transform ${
-                        dropdownOpen.department ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-                  {dropdownOpen.department && (
-                    <div className="absolute z-50 mt-1 w-48 rounded-md bg-white shadow-lg border border-gray-200 max-h-48 overflow-auto">
-                      <div className="py-1">
-                        <button
-                          onClick={clearDepartmentFilter}
-                          className={`block w-full text-left px-2 py-2 text-sm ${
-                            !departmentFilter
-                              ? "bg-purple-100 text-purple-900"
-                              : "text-gray-700 hover:bg-gray-100"
-                          }`}
-                        >
-                          All Departments
-                        </button>
-                        {allDepartments.map((dept) => (
-                          <button
-                            key={dept}
-                            onClick={() => handleDepartmentFilterSelect(dept)}
-                            className={`block w-full text-left px-2 py-2 text-sm ${
-                              departmentFilter === dept
-                                ? "bg-purple-100 text-purple-900"
-                                : "text-gray-700 hover:bg-gray-100"
-                            }`}
-                          >
-                            {dept}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {userRole === "admin" && (
-              <button
-                onClick={toggleHistory}
-                className="w-full sm:w-auto rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 py-2 px-2 text-white hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                {showHistory ? (
-                  <div className="flex items-center justify-center sm:justify-start">
-                    <ArrowLeft className="h-4 w-4 mr-1" />
-                    <span>Back to Tasks</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center sm:justify-start">
-                    <History className="h-4 w-4 mr-1" />
-                    <span>View History</span>
-                  </div>
-                )}
-              </button>
-            )}
-
-            {!showHistory && (
-              <button
-                onClick={handleSubmit}
-                disabled={selectedItemsCount === 0 || isSubmitting}
-                className="w-48 sm:w-auto rounded-md bg-gradient-to-r from-purple-600 to-pink-600 py-2 px-2 text-white hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting
-                  ? "Processing..."
-                  : `Submit Selected (${selectedItemsCount})`}
-              </button>
-            )}
-          </div>
+          )}
         </div>
+
+        {/* DEPARTMENT FILTER */}
+        <div className="relative w-full sm:w-auto">
+          <button
+            onClick={() => toggleDropdown("department")}
+            className="flex items-center justify-between gap-2 w-full px-3 py-2 border border-purple-200 
+                       rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Filter className="h-4 w-4" />
+            {departmentFilter || "Filter by Department"}
+            <ChevronDown
+              size={16}
+              className={`transition-transform ${
+                dropdownOpen.department ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+
+          {dropdownOpen.department && (
+            <div className="absolute z-50 mt-1 w-full sm:w-48 rounded-md bg-white shadow-lg 
+                            border border-gray-200 max-h-48 overflow-auto">
+              <div className="py-1">
+                <button
+                  onClick={clearDepartmentFilter}
+                  className={`block w-full text-left px-3 py-2 text-sm ${
+                    !departmentFilter
+                      ? "bg-purple-100 text-purple-900"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  All Departments
+                </button>
+
+                {allDepartments.map((dept) => (
+                  <button
+                    key={dept}
+                    onClick={() => handleDepartmentFilterSelect(dept)}
+                    className={`block w-full text-left px-3 py-2 text-sm ${
+                      departmentFilter === dept
+                        ? "bg-purple-100 text-purple-900"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
+                  >
+                    {dept}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* HISTORY BUTTON (ADMIN) */}
+    {userRole === "admin" && (
+      <button
+        onClick={toggleHistory}
+        className="w-full sm:w-auto rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 
+                   py-2 px-3 text-white hover:from-blue-600 hover:to-indigo-700 
+                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      >
+        {showHistory ? (
+          <div className="flex items-center justify-center">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            <span>Back to Tasks</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center">
+            <History className="h-4 w-4 mr-1" />
+            <span>View History</span>
+          </div>
+        )}
+      </button>
+    )}
+
+    {/* SUBMIT BUTTON */}
+    {!showHistory && (
+      <button
+        onClick={handleSubmit}
+        disabled={selectedItemsCount === 0 || isSubmitting}
+        className="w-full sm:w-auto rounded-md bg-gradient-to-r from-purple-600 to-pink-600 
+                   py-2 px-3 text-white hover:from-purple-700 hover:to-pink-700 
+                   focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isSubmitting
+          ? "Processing..."
+          : `Submit Selected (${selectedItemsCount})`}
+      </button>
+    )}
+
+  </div>
+</div>
+
 
         {successMessage && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md flex items-center justify-between">
@@ -1741,11 +1953,14 @@ function DelegationDataPage() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredAccountData.length > 0 ? (
-                      filteredAccountData.map((account) => {
-                        const isSelected = selectedItems.has(account._id);
-                        const rowColorClass = getRowColor(account["col17"]);
-                        const isTodayTask =
-                          isToday(account["col6"]) || isToday(account["col10"]);
+                     filteredAccountData.map((account) => {
+                      const isSelected = selectedItems.has(account._id);
+                      const isDisabled = account.isDisabled;
+                      const isComplete = account.status === "Complete";
+                      const rowColorClass = getRowColor(account["col17"]);
+                      const taskStatus = statusData[account._id] || "";
+                      const isTodayTask = isToday(account["col6"]);
+                    
 
                         return (
                           <tr
@@ -1918,76 +2133,82 @@ function DelegationDataPage() {
                                 rows="2"
                               />
                             </td>
-                            <td
-                              className={`px-6 py-4 min-w-[150px] ${
-                                !account["col17"] ? "bg-orange-50" : ""
-                              }`}
-                            >
-                              {account.image ? (
-                                <div className="flex items-center">
-                                  <img
-                                    src={
-                                      typeof account.image === "string"
-                                        ? account.image
-                                        : URL.createObjectURL(account.image)
-                                    }
-                                    alt="Receipt"
-                                    className="h-10 w-10 object-cover rounded-md mr-2"
-                                  />
-                                  <div className="flex flex-col">
-                                    <span className="text-xs text-gray-500 whitespace-normal break-words">
-                                      {account.image instanceof File
-                                        ? account.image.name
-                                        : "Uploaded Receipt"}
-                                    </span>
-                                    {account.image instanceof File ? (
-                                      <span className="text-xs text-green-600">
-                                        Ready to upload
-                                      </span>
-                                    ) : (
-                                      <button
-                                        className="text-xs text-purple-600 hover:text-purple-800"
-                                        onClick={() =>
-                                          window.open(account.image, "_blank")
-                                        }
-                                      >
-                                        View Full Image
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : (
-                                <label
-                                  className={`flex items-center cursor-pointer ${
-                                    account["col9"]?.toUpperCase() === "YES"
-                                      ? "text-red-600 font-medium"
-                                      : "text-purple-600"
-                                  } hover:text-purple-800`}
-                                >
-                                  <Upload className="h-4 w-4 mr-1" />
-                                  <span className="text-xs whitespace-normal break-words">
-                                    {account["col9"]?.toUpperCase() === "YES"
-                                      ? "Required Upload"
-                                      : "Upload Image"}
-                                    {account["col9"]?.toUpperCase() ===
-                                      "YES" && (
-                                      <span className="text-red-500 ml-1">
-                                        *
-                                      </span>
-                                    )}
-                                  </span>
-                                  <input
-                                    type="file"
-                                    className="hidden"
-                                    accept="image/*"
-                                    onChange={(e) =>
-                                      handleImageUpload(account._id, e)
-                                    }
-                                    disabled={!isSelected}
-                                  />
-                                </label>
-                              )}
-                            </td>
+           {/* Upload Image */}
+<td className="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap w-[160px]">
+  {account.image ? (
+    <div className="flex items-center">
+      <img
+        src={
+          typeof account.image === "string"
+            ? account.image
+            : URL.createObjectURL(account.image)
+        }
+        alt="Receipt"
+        className="h-10 w-10 object-cover rounded-md mr-2"
+      />
+      <div className="flex flex-col">
+        <span className="text-xs text-gray-500">
+          {account.image instanceof File
+            ? account.image.name
+            : "Uploaded Receipt"}
+        </span>
+        {account.image instanceof File ? (
+          <span className="text-xs text-green-600">Ready to upload</span>
+        ) : (
+          <button
+            className="text-xs text-purple-600 hover:text-purple-800"
+            onClick={() => window.open(account.image, "_blank")}
+          >
+            View Full Image
+          </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-2">
+      <label
+        htmlFor={`upload-${account._id}`}
+        className={`flex items-center cursor-pointer ${
+          account["col9"]?.toUpperCase() === "YES"
+            ? "text-red-600 font-medium"
+            : "text-purple-600 hover:text-purple-800"
+        } ${isDisabled ? "pointer-events-none opacity-50" : ""}`}
+      >
+        <Upload className="h-4 w-4 mr-1" />
+        <span className="text-xs">
+          {account["col9"]?.toUpperCase() === "YES"
+            ? "Required Upload"
+            : "Upload Image"}
+          {account["col9"]?.toUpperCase() === "YES" && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
+        </span>
+      </label>
+
+      <input
+        id={`upload-${account._id}`}
+        type="file"
+        className="hidden"
+        accept="image/*"
+        onChange={(e) => handleImageUpload(account._id, e)}
+        disabled={!isSelected || isDisabled}
+      />
+
+      <button
+        onClick={() => {
+          if (!isSelected || isDisabled) return;
+          setCurrentCaptureId(account._id);
+          startCamera();
+        }}
+        disabled={!isSelected || isDisabled || isCameraLoading}
+        className="flex items-center text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Camera className="h-4 w-4 mr-1" />
+        <span>{isCameraLoading ? "Loading..." : "Take Photo"}</span>
+      </button>
+    </div>
+  )}
+</td>
                           </tr>
                         );
                       })
@@ -2009,290 +2230,294 @@ function DelegationDataPage() {
 
               {/* Regular Tasks Table - Mobile Card View */}
               <div className="sm:hidden space-y-4 p-4">
-                {filteredAccountData.length > 0 ? (
-                  filteredAccountData.map((account) => {
-                    const isSelected = selectedItems.has(account._id);
-                    const rowColorClass = getRowColor(account["col17"]);
-                    const isTodayTask =
-                      isToday(account["col6"]) || isToday(account["col10"]);
+  {filteredAccountData.length > 0 ? (
+   filteredAccountData.map((account) => {
+    const isSelected = selectedItems.has(account._id);
+    const isDisabled = account.isDisabled;
+    const isComplete = account.status === "Complete";
+    const rowColorClass = getRowColor(account["col17"]);
+    const taskStatus = statusData[account._id] || "";
+    const isTodayTask = isToday(account["col6"]);
+  
+      return (
+        <div key={account._id} className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm ${
+          isSelected ? "bg-purple-50 border-purple-200" : ""
+        } ${rowColorClass}`}>
+          
+          {/* TODAY Badge */}
+          {isTodayTask && (
+            <div className="bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-md shadow-md mb-3 text-center">
+              TODAY
+            </div>
+          )}
 
-                    return (
-                      <div
-                        key={account._id}
-                        className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm ${
-                          isSelected ? "bg-purple-50 border-purple-200" : ""
-                        } ${rowColorClass}`}
-                      >
-                        {isTodayTask && (
-                          <div className="bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-md shadow-md mb-3 text-center">
-                            TODAY
-                          </div>
-                        )}
+          <div className="space-y-3">
+            {/* Checkbox */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Select:</span>
+              <input
+                type="checkbox"
+                className="h-5 w-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                checked={isSelected}
+                onChange={(e) => handleCheckboxClick(e, account._id)}
+              />
+            </div>
 
-                        <div className="space-y-3">
-                          {/* Checkbox */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Select:
-                            </span>
-                            <input
-                              type="checkbox"
-                              className="h-5 w-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                              checked={isSelected}
-                              onChange={(e) =>
-                                handleCheckboxClick(e, account._id)
-                              }
-                            />
-                          </div>
-
-                          {/* Task ID */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Task ID:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {account["col1"] || "—"}
-                            </div>
-                          </div>
-
-                          {/* Department */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Department:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {account["col2"] || "—"}
-                            </div>
-                          </div>
-
-                          {/* Given By */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Given By:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {account["col3"] || "—"}
-                            </div>
-                          </div>
-
-                          {/* Name */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Name:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {account["col4"] || "—"}
-                            </div>
-                          </div>
-
-                          {/* Task Description */}
-                          <div className="flex justify-between items-start border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Description:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words text-right max-w-[60%]">
-                              {account["col5"] || "—"}
-                            </div>
-                          </div>
-
-                          {/* Task Start Date */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Start Date:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {formatDateTimeForDisplay(account["col6"])}
-                            </div>
-                          </div>
-
-                          {/* Planned Date */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Planned Date:
-                            </span>
-                            <div className="text-sm text-gray-900 break-words">
-                              {formatDateTimeForDisplay(account["col10"])}
-                            </div>
-                          </div>
-
-                          {/* Status */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Status:
-                            </span>
-                            <select
-                              disabled={!isSelected}
-                              value={statusData[account._id] || ""}
-                              onChange={(e) =>
-                                handleStatusChange(account._id, e.target.value)
-                              }
-                              className="border border-gray-300 rounded-md px-2 py-1 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
-                            >
-                              <option value="">Select</option>
-                              <option value="Done">Done</option>
-                              <option value="Extend date">Extend date</option>
-                            </select>
-                          </div>
-
-                          {/* Next Target Date */}
-                          <div className="flex justify-between items-center border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Next Target Date:
-                            </span>
-                            <input
-                              type="date"
-                              disabled={
-                                !isSelected ||
-                                statusData[account._id] !== "Extend date"
-                              }
-                              value={
-                                nextTargetDate[account._id]
-                                  ? (() => {
-                                      const dateStr =
-                                        nextTargetDate[account._id];
-                                      if (dateStr && dateStr.includes("/")) {
-                                        const datePart = dateStr.split(" ")[0];
-                                        const [day, month, year] =
-                                          datePart.split("/");
-                                        return `${year}-${month.padStart(
-                                          2,
-                                          "0"
-                                        )}-${day.padStart(2, "0")}`;
-                                      }
-                                      return dateStr;
-                                    })()
-                                  : ""
-                              }
-                              onChange={(e) => {
-                                const inputDate = e.target.value;
-                                if (inputDate) {
-                                  const [year, month, day] =
-                                    inputDate.split("-");
-                                  const currentTime = new Date();
-                                  const hours = currentTime
-                                    .getHours()
-                                    .toString()
-                                    .padStart(2, "0");
-                                  const minutes = currentTime
-                                    .getMinutes()
-                                    .toString()
-                                    .padStart(2, "0");
-                                  const seconds = currentTime
-                                    .getSeconds()
-                                    .toString()
-                                    .padStart(2, "0");
-                                  const formattedDateTime = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-                                  handleNextTargetDateChange(
-                                    account._id,
-                                    formattedDateTime
-                                  );
-                                } else {
-                                  handleNextTargetDateChange(account._id, "");
-                                }
-                              }}
-                              className="border border-gray-300 rounded-md px-2 py-1 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
-                            />
-                          </div>
-
-                          {/* Remarks */}
-                          <div className="flex justify-between items-start border-b pb-2">
-                            <span className="font-medium text-gray-700">
-                              Remarks:
-                            </span>
-                            <textarea
-                              placeholder="Enter remarks"
-                              disabled={!isSelected}
-                              value={remarksData[account._id] || ""}
-                              onChange={(e) =>
-                                setRemarksData((prev) => ({
-                                  ...prev,
-                                  [account._id]: e.target.value,
-                                }))
-                              }
-                              className="border rounded-md px-2 py-1 border-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm resize-none w-32"
-                              rows="2"
-                            />
-                          </div>
-
-                          {/* Upload Image */}
-                          <div className="flex justify-between items-center">
-                            <span className="font-medium text-gray-700">
-                              Attachment:
-                            </span>
-                            {account.image ? (
-                              <div className="flex items-center">
-                                <img
-                                  src={
-                                    typeof account.image === "string"
-                                      ? account.image
-                                      : URL.createObjectURL(account.image)
-                                  }
-                                  alt="Receipt"
-                                  className="h-10 w-10 object-cover rounded-md mr-2"
-                                />
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-gray-500 break-words">
-                                    {account.image instanceof File
-                                      ? account.image.name
-                                      : "Uploaded"}
-                                  </span>
-                                  {account.image instanceof File ? (
-                                    <span className="text-xs text-green-600">
-                                      Ready to upload
-                                    </span>
-                                  ) : (
-                                    <button
-                                      className="text-xs text-purple-600 hover:text-purple-800"
-                                      onClick={() =>
-                                        window.open(account.image, "_blank")
-                                      }
-                                    >
-                                      View
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <label
-                                className={`flex items-center cursor-pointer ${
-                                  account["col9"]?.toUpperCase() === "YES"
-                                    ? "text-red-600 font-medium"
-                                    : "text-purple-600"
-                                } hover:text-purple-800`}
-                              >
-                                <Upload className="h-4 w-4 mr-1" />
-                                <span className="text-xs break-words">
-                                  {account["col9"]?.toUpperCase() === "YES"
-                                    ? "Required*"
-                                    : "Upload"}
-                                </span>
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  accept="image/*"
-                                  onChange={(e) =>
-                                    handleImageUpload(account._id, e)
-                                  }
-                                  disabled={!isSelected}
-                                />
-                              </label>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-center text-gray-500 py-8">
-                    {searchTerm || nameFilter || departmentFilter
-                      ? "No tasks matching your filters"
-                      : "No pending tasks found"}
-                  </div>
-                )}
+            {/* Task ID */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Task ID:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {account["col1"] || "—"}
               </div>
+            </div>
+
+            {/* Department */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Department:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {account["col2"] || "—"}
+              </div>
+            </div>
+
+            {/* Given By */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Given By:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {account["col3"] || "—"}
+              </div>
+            </div>
+
+            {/* Name */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Name:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {account["col4"] || "—"}
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="flex justify-between items-start border-b pb-2">
+              <span className="font-medium text-gray-700">Description:</span>
+              <div className="text-sm text-gray-900 break-words text-right max-w-[60%]">
+                {account["col5"] || "—"}
+              </div>
+            </div>
+
+            {/* Start Date */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Start Date:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {formatDateTimeForDisplay(account["col6"])}
+              </div>
+            </div>
+
+            {/* Planned Date */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Planned Date:</span>
+              <div className="text-sm text-gray-900 break-words">
+                {formatDateTimeForDisplay(account["col10"])}
+              </div>
+            </div>
+
+            {/* Status */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Status:</span>
+              <select
+                disabled={!isSelected}
+                value={taskStatus}
+                onChange={(e) => handleStatusChange(account._id, e.target.value)}
+                className="border border-gray-300 rounded-md px-2 py-1 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+              >
+                <option value="">Select</option>
+                <option value="Done">Done</option>
+                <option value="Extend date">Extend date</option>
+              </select>
+            </div>
+
+            {/* Next Target Date */}
+            <div className="flex justify-between items-center border-b pb-2">
+              <span className="font-medium text-gray-700">Next Target Date:</span>
+              <input
+                type="date"
+                disabled={!isSelected || taskStatus !== "Extend date"}
+                value={
+                  nextTargetDate[account._id]
+                    ? (() => {
+                        const dateStr = nextTargetDate[account._id];
+                        if (dateStr && dateStr.includes("/")) {
+                          const datePart = dateStr.split(" ")[0];
+                          const [day, month, year] = datePart.split("/");
+                          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+                        }
+                        return dateStr;
+                      })()
+                    : ""
+                }
+                onChange={(e) => {
+                  const inputDate = e.target.value;
+                  if (inputDate) {
+                    const [year, month, day] = inputDate.split("-");
+                    const currentTime = new Date();
+                    const formattedDateTime = `${day}/${month}/${year} ${currentTime.getHours().toString().padStart(2, "0")}:${currentTime.getMinutes().toString().padStart(2, "0")}:${currentTime.getSeconds().toString().padStart(2, "0")}`;
+                    handleNextTargetDateChange(account._id, formattedDateTime);
+                  }
+                }}
+                className="border border-gray-300 rounded-md px-2 py-1 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+              />
+            </div>
+
+            {/* Remarks */}
+            <div className="flex justify-between items-start border-b pb-2">
+              <span className="font-medium text-gray-700">Remarks:</span>
+              <textarea
+                placeholder="Enter remarks"
+                disabled={!isSelected}
+                value={remarksData[account._id] || ""}
+                onChange={(e) => setRemarksData((prev) => ({ ...prev, [account._id]: e.target.value }))}
+                className="border rounded-md px-2 py-1 border-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm resize-none w-32"
+                rows="2"
+              />
+            </div>
+
+            {/* ✅ CAMERA + GALLERY BUTTONS */}
+            <div className="text-sm">
+  <span className="font-medium">Upload Image: </span>
+  {account.image ? (
+    <div className="flex items-center mt-2">
+      <img
+        src={
+          typeof account.image === "string"
+            ? account.image
+            : URL.createObjectURL(account.image)
+        }
+        alt="Receipt"
+        className="h-10 w-10 object-cover rounded-md mr-2"
+      />
+      <div className="flex flex-col">
+        <span className="text-xs text-gray-500">
+          {account.image instanceof File ? account.image.name : "Uploaded Receipt"}
+        </span>
+        {account.image instanceof File ? (
+          <span className="text-xs text-green-600">Ready to upload</span>
+        ) : (
+          <button
+            className="text-xs text-purple-600 hover:text-purple-800"
+            onClick={() => window.open(account.image, "_blank")}
+          >
+            View Full Image
+          </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="flex items-center space-x-2 mt-2">
+     <button
+  onClick={() => {
+    if (!isSelected || isDisabled) return;
+    setCurrentCaptureId(account._id);
+    startCamera();
+  }}
+  disabled={!isSelected || isDisabled}
+  className={`flex items-center px-3 py-2 rounded-lg border-2 text-sm font-medium ${
+    isSelected ? "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100 shadow-md" : "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
+  } disabled:opacity-50 disabled:cursor-not-allowed`}
+>
+  <Camera className="h-4 w-4 mr-1" />
+  <span>Camera</span>
+</button>
+
+      <label className={`flex items-center px-3 py-2 rounded-lg border-2 text-sm font-medium ${
+        isSelected 
+          ? account["col9"]?.toUpperCase() === "YES" 
+            ? "bg-red-50 border-red-300 text-red-700 hover:bg-red-100 shadow-md" 
+            : "bg-purple-50 border-purple-300 text-purple-700 hover:bg-purple-100 shadow-md"
+          : "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
+      }`}>
+        <Upload className="h-4 w-4 mr-1" />
+        <span>{account["col9"]?.toUpperCase() === "YES" ? "Required*" : "Gallery"}</span>
+        <input
+          type="file"
+          className="hidden"
+          accept="image/*"
+          onChange={(e) => handleImageUpload(account._id, e)}
+          disabled={!isSelected || isDisabled}
+        />
+      </label>
+    </div>
+  )}
+</div>
+          </div>
+        </div>
+      );
+    })
+  ) : (
+    <div className="text-center text-gray-500 py-8">
+      No pending tasks found
+    </div>
+  )}
+</div>
+
             </>
           )}
         </div>
+        {isCameraOpen && (
+  <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full overflow-hidden">
+      <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between">
+        <h3 className="text-lg font-semibold">📸 Take Photo</h3>
+        <button
+          onClick={stopCamera}
+          className="text-white hover:text-gray-200 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="relative bg-black">
+        <video
+          ref={videoRef}
+          className="w-full h-[400px] object-cover"
+          autoPlay
+          playsInline
+          muted
+        />
+
+        {isCameraLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="text-white text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent mx-auto mb-3"></div>
+              <p>Initializing camera...</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {cameraError && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4">
+          <p className="text-sm text-red-700">{cameraError}</p>
+        </div>
+      )}
+
+      <div className="p-4 bg-gray-50 flex gap-3 justify-end">
+        <button
+          type="button"
+          onClick={stopCamera}
+          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={capturePhoto}
+          disabled={isCameraLoading}
+          className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          📸 Capture Photo
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       </div>
     </AdminLayout>
   );

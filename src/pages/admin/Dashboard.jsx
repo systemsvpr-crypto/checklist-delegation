@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { BarChart3, CheckCircle2, Clock, ListTodo, Users, AlertTriangle, Filter } from 'lucide-react'
+import { BarChart3, CheckCircle2, Clock, ListTodo, Users, AlertTriangle, Filter,X ,Search} from 'lucide-react'
 import AdminLayout from "../../components/layout/AdminLayout.jsx"
 import {
   BarChart,
@@ -24,6 +24,18 @@ export default function AdminDashboard() {
   const [filterStaff, setFilterStaff] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("overview")
+  const [filterDepartment, setFilterDepartment] = useState("all");
+  const [filterName, setFilterName] = useState("all");
+
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupData, setPopupData] = useState([]);
+  const [popupType, setPopupType] = useState("");
+  const [popupFilters, setPopupFilters] = useState({
+    search: "",
+    department: "all",
+    givenBy: "all",
+    name: "all",
+  });
 
   // State for department data
   const [departmentData, setDepartmentData] = useState({
@@ -33,44 +45,148 @@ export default function AdminDashboard() {
     completedTasks: 0,
     pendingTasks: 0,
     overdueTasks: 0,
+    upcomingTasks: 0,
     completionRate: 0,
     barChartData: [],
     pieChartData: [],
-    // Add new counters for delegation mode
     completedRatingOne: 0,
     completedRatingTwo: 0,
-    completedRatingThreePlus: 0
-  })
+    completedRatingThreePlus: 0,
+    notDoneTasks: 0,
+  });
 
-  // Store the current date for overdue calculation
-  const [currentDate, setCurrentDate] = useState(new Date())
+  const [currentDate, setCurrentDate] = useState(new Date());
 
-  // New state for date range filtering
   const [dateRange, setDateRange] = useState({
     startDate: "",
     endDate: "",
-    filtered: false
+    filtered: false,
   });
 
-  // State to store filtered statistics
   const [filteredDateStats, setFilteredDateStats] = useState({
     totalTasks: 0,
     completedTasks: 0,
     pendingTasks: 0,
     overdueTasks: 0,
-    completionRate: 0
+    completionRate: 0,
   });
 
-  // Helper function to format date from ISO format to DD/MM/YYYY
+  const handleCardClick = (type) => {
+    setPopupType(type);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let filteredTasks = [];
+
+    if (type === 'total') {
+      filteredTasks = [...departmentData.allTasks];
+    } else if (type === 'completed') {
+      filteredTasks = departmentData.allTasks.filter(task =>
+        task.status === 'completed'
+      );
+    } else if (type === 'pending') {
+      if (dashboardType === 'delegation') {
+        filteredTasks = departmentData.allTasks.filter(task => {
+          if (task.status === 'completed') return false;
+          return true;
+        });
+      } else {
+        filteredTasks = departmentData.allTasks.filter(task =>
+          task.status !== 'completed'
+        );
+      }
+    } else if (type === 'overdue') {
+      filteredTasks = departmentData.allTasks.filter(task => {
+        if (task.status === 'completed') return false;
+        const taskDate = parseDateFromDDMMYYYY(task.taskStartDate);
+        if (!taskDate) return false;
+        return taskDate < today;
+      });
+    } else if (type === 'notDone') {
+      filteredTasks = departmentData.allTasks.filter(task => {
+        const statusColumnValue = task.notDoneStatus;
+        return statusColumnValue === 'Not Done' || statusColumnValue === 'not done';
+      });
+    } else if (type === 'upcoming') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+
+      console.log("Filtering upcoming tasks:");
+      console.log("Today:", today);
+      console.log("Tomorrow:", tomorrow);
+
+      filteredTasks = departmentData.allTasks.filter(task => {
+        const taskDate = parseDateFromDDMMYYYY(task.taskStartDate);
+
+        const isTargetDate = taskDate && (
+          taskDate.getTime() === today.getTime() ||
+          taskDate.getTime() === tomorrow.getTime()
+        );
+
+        const isIncomplete = task.status !== 'completed';
+
+        console.log("Task ID:", task.id,
+          "Date:", task.taskStartDate,
+          "Status:", task.status,
+          "Is target date:", isTargetDate,
+          "Is incomplete:", isIncomplete);
+
+        return isTargetDate && isIncomplete;
+      });
+
+      console.log("Filtered upcoming tasks count:", filteredTasks.length);
+    }
+
+    filteredTasks = filteredTasks.filter(task => {
+      const deptMatch = filterDepartment === "all" || task.department === filterDepartment;
+      const nameMatch = filterName === "all" || task.assignedTo === filterName;
+      return deptMatch && nameMatch;
+    });
+
+    console.log("Final filtered tasks for popup:", filteredTasks.length);
+    setPopupData(filteredTasks);
+
+    setPopupFilters({
+      search: "",
+      department: "all",
+      givenBy: "all",
+      name: "all",
+    });
+
+    setPopupOpen(true);
+  };
+
+  const handlePopupFilterChange = (filterType, value) => {
+    setPopupFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }));
+  };
+
+  const getFilteredPopupData = () => {
+    return popupData.filter(task => {
+      const searchMatch = !popupFilters.search ||
+        (task.title && task.title.toLowerCase().includes(popupFilters.search.toLowerCase())) ||
+        (task.id && task.id.toString().includes(popupFilters.search));
+
+      const deptMatch = popupFilters.department === "all" || task.department === popupFilters.department;
+      const nameMatch = popupFilters.name === "all" || task.assignedTo === popupFilters.name;
+
+      return searchMatch && deptMatch && nameMatch;
+    });
+  };
+
   const formatLocalDate = (isoDate) => {
     if (!isoDate) return "";
     const date = new Date(isoDate);
     return formatDateToDDMMYYYY(date);
   };
 
-  // Function to filter tasks by date range
   const filterTasksByDateRange = () => {
-    // Validate dates
     if (!dateRange.startDate || !dateRange.endDate) {
       alert("Please select both start and end dates");
       return;
@@ -89,26 +205,18 @@ export default function AdminDashboard() {
 
     let tasksToFilter = departmentData.allTasks;
     if (filterStaff !== "all") {
-      tasksToFilter = tasksToFilter.filter(task => task.assignedTo === filterStaff);
+      tasksToFilter = tasksToFilter.filter(
+        (task) => task.assignedTo === filterStaff
+      );
     }
 
-    // Then filter tasks within the date range from the already staff-filtered tasks
-    const filteredTasks = tasksToFilter.filter(task => {
+    const filteredTasks = tasksToFilter.filter((task) => {
       const taskStartDate = parseDateFromDDMMYYYY(task.taskStartDate);
       if (!taskStartDate) return false;
 
       return taskStartDate >= startDate && taskStartDate <= endDate;
     });
 
-    // Filter tasks within the date range
-    // const filteredTasks = departmentData.allTasks.filter(task => {
-    //   const taskStartDate = parseDateFromDDMMYYYY(task.taskStartDate);
-    //   if (!taskStartDate) return false;
-
-    //   return taskStartDate >= startDate && taskStartDate <= endDate;
-    // });
-
-    // Count statistics
     let totalTasks = filteredTasks.length;
     let completedTasks = 0;
     let pendingTasks = 0;
@@ -117,33 +225,30 @@ export default function AdminDashboard() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    filteredTasks.forEach(task => {
-      if (task.status === 'completed') {
+    filteredTasks.forEach((task) => {
+      if (task.status === "completed") {
         completedTasks++;
       } else {
-        // Task is not completed
-        pendingTasks++; // All incomplete tasks count as pending
+        pendingTasks++;
 
-        if (task.status === 'overdue') {
-          overdueTasks++; // Only past dates (excluding today) count as overdue
+        if (task.status === "overdue") {
+          overdueTasks++;
         }
       }
     });
 
-    // Calculate completion rate
-    const completionRate = totalTasks > 0 ? ((completedTasks / totalTasks) * 100).toFixed(1) : 0;
+    const completionRate =
+      totalTasks > 0 ? ((completedTasks / totalTasks) * 100).toFixed(1) : 0;
 
-    // Update filtered stats
     setFilteredDateStats({
       totalTasks,
       completedTasks,
       pendingTasks,
       overdueTasks,
-      completionRate
+      completionRate,
     });
 
-    // Set filtered flag to true
-    setDateRange(prev => ({ ...prev, filtered: true }));
+    setDateRange((prev) => ({ ...prev, filtered: true }));
   };
 
   // Format date as DD/MM/YYYY
@@ -463,18 +568,18 @@ export default function AdminDashboard() {
         if (rowIndex <= 5) {
           // console.log(`Row ${rowIndex + 1}: status="${status}", completionDate="${completionDate}", dashboardType="${dashboardType}"`);
         }
-
+        const department = getCellValue(row, 2) || "";
         // Create the task object
         const taskObj = {
           id: taskIdStr,
           title: taskDescription,
           assignedTo,
+          department, // Add this line
           taskStartDate,
-          dueDate: taskStartDate, // Keep for compatibility
+          dueDate: taskStartDate,
           status,
           frequency
         };
-
         // Debug: Log task object for first few rows
         if (rowIndex <= 5) {
           // console.log(`Row ${rowIndex + 1}: Created task object:`, taskObj);
@@ -968,7 +1073,7 @@ export default function AdminDashboard() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-all bg-white">
+          <div className="rounded-lg border border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-all bg-white"onClick={() => handleCardClick('total')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-blue-50 to-blue-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-blue-700">Total Tasks</h3>
               <ListTodo className="h-4 w-4 text-blue-500" />
@@ -984,7 +1089,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-all bg-white">
+          <div className="rounded-lg border border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-all bg-white"onClick={() => handleCardClick('completed')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-green-50 to-green-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-green-700">
                 {dashboardType === "delegation" ? "Completed Once" : "Completed Tasks"}
@@ -1001,7 +1106,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-l-4 border-l-amber-500 shadow-md hover:shadow-lg transition-all bg-white">
+          <div className="rounded-lg border border-l-4 border-l-amber-500 shadow-md hover:shadow-lg transition-all bg-white"onClick={() => handleCardClick('pending')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-amber-50 to-amber-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-amber-700">
                 {dashboardType === "delegation" ? "Completed Twice" : "Pending Tasks"}
@@ -1022,7 +1127,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-all bg-white">
+          <div className="rounded-lg border border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-all bg-white"onClick={() => handleCardClick('overdue')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-red-50 to-red-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-red-700">
                 {dashboardType === "delegation" ? "Completed 3+ Times" : "Overdue Tasks"}
@@ -1695,6 +1800,149 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+        {popupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl w-11/12 max-w-6xl h-5/6 flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-xl font-bold text-purple-700">
+                {popupType.charAt(0).toUpperCase() + popupType.slice(1)} Tasks Details
+              </h2>
+              <button
+                onClick={() => setPopupOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b bg-gray-50">
+              <div className="flex flex-wrap gap-4 items-center">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                  <input
+                    type="text"
+                    placeholder="Search tasks..."
+                    value={popupFilters.search}
+                    onChange={(e) => handlePopupFilterChange('search', e.target.value)}
+                    className="pl-10 pr-4 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                <select
+                  value={popupFilters.department}
+                  onChange={(e) => handlePopupFilterChange('department', e.target.value)}
+                  className="border border-purple-200 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="all">All Departments</option>
+                  {Array.from(new Set(popupData.map(task => task.department).filter(Boolean))).map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={popupFilters.name}
+                  onChange={(e) => handlePopupFilterChange('name', e.target.value)}
+                  className="border border-purple-200 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="all">All Names</option>
+                  {Array.from(new Set(popupData.map(task => task.assignedTo).filter(Boolean))).map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => setPopupFilters({
+                    search: "",
+                    department: "all",
+                    givenBy: "all",
+                    name: "all",
+                  })}
+                  className="px-4 py-2 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors font-medium flex items-center gap-2"
+                >
+                  <X size={16} />
+                  Clear Filters
+                </button>
+
+                <h1 className="text-blue-800 font-medium">
+                  Total Tasks: {getFilteredPopupData().length}
+                </h1>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              <div className="hidden md:block">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                      {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Given By</th> */}
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Frequency</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {getFilteredPopupData().map(task => (
+                      <tr key={task.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 text-sm text-gray-900">{task.id}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{task.department}</td>
+                        {/* <td className="px-6 py-4 text-sm text-gray-500">Given By data</td> */}
+                        <td className="px-6 py-4 text-sm text-gray-500">{task.assignedTo}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{task.title}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{task.taskStartDate}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{task.frequency}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="md:hidden space-y-4 p-4">
+                {getFilteredPopupData().map(task => (
+                  <div key={task.id} className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-xs font-medium text-gray-500">Task ID</span>
+                        <p className="text-sm font-semibold text-gray-900">{task.id}</p>
+                      </div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${task.frequency === 'daily' ? 'bg-blue-100 text-blue-700' :
+                          task.frequency === 'weekly' ? 'bg-purple-100 text-purple-700' :
+                            task.frequency === 'monthly' ? 'bg-orange-100 text-orange-700' :
+                              'bg-gray-100 text-gray-700'
+                        }`}>
+                        {task.frequency}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-xs font-medium text-gray-500">Description</span>
+                      <p className="text-sm text-gray-900 mt-1">{task.title}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-xs font-medium text-gray-500">Department</span>
+                        <p className="text-sm text-gray-900">{task.department}</p>
+                      </div>
+                      <div>
+                        <span className="text-xs font-medium text-gray-500">Assigned To</span>
+                        <p className="text-sm text-gray-900">{task.assignedTo}</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-xs font-medium text-gray-500">Start Date</span>
+                      <p className="text-sm text-gray-900">{task.taskStartDate}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </AdminLayout>
   )

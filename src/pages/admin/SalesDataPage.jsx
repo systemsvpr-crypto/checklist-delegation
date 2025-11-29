@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo,useRef  } from "react";
 import {
   CheckCircle2,
   Upload,
@@ -10,6 +10,7 @@ import {
   Edit,
   Save,
   XCircle,
+  Camera,
 } from "lucide-react";
 import AdminLayout from "../../components/layout/AdminLayout";
 
@@ -66,6 +67,216 @@ function AccountDataPage() {
 
   const [buddyTaskFilter, setBuddyTaskFilter] = useState(""); // Selected buddy name
   const [assignedPersons, setAssignedPersons] = useState([]); // List from sessionStorage
+  const [currentCaptureId, setCurrentCaptureId] = useState(null);
+  // Ye states already hai aapke code me (around line 50-60), check karo ye sab exist karte hai:
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [isCameraLoading, setIsCameraLoading] = useState(false); // ✅ Ye line check karo
+  // Add these functions in your component (around line 150-250, after other functions)
+  
+  
+  
+  // Camera cleanup when component unmounts
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+  const startCamera = async () => {
+    try {
+      setCameraError("");
+      setIsCameraLoading(true);
+  
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraError("Camera not supported on this device");
+        setIsCameraLoading(false);
+        return;
+      }
+  
+      console.log("Requesting camera access...");
+  
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+  
+      console.log("Camera access granted!");
+  
+      setCameraStream(stream);
+      setIsCameraOpen(true);
+  
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+  
+        await new Promise((resolve, reject) => {
+          const video = videoRef.current;
+          if (!video) {
+            reject(new Error("Video ref lost"));
+            return;
+          }
+  
+          let metadataLoaded = false;
+          let canPlay = false;
+  
+          const checkReady = () => {
+            if (metadataLoaded && canPlay) {
+              console.log("✅ Video fully ready! Dimensions:", video.videoWidth, "x", video.videoHeight);
+              resolve();
+            }
+          };
+  
+          video.onloadedmetadata = () => {
+            console.log("📹 Metadata loaded");
+            metadataLoaded = true;
+            checkReady();
+          };
+  
+          video.oncanplay = () => {
+            console.log("▶️ Can play event fired");
+            canPlay = true;
+            checkReady();
+          };
+  
+          video.onerror = (err) => {
+            console.error("Video error:", err);
+            reject(err);
+          };
+  
+          setTimeout(() => {
+            if (!metadataLoaded || !canPlay) {
+              reject(new Error("Video initialization timeout"));
+            }
+          }, 10000);
+        });
+  
+        await videoRef.current.play();
+        console.log("🎬 Camera streaming successfully!");
+      }
+  
+    } catch (error) {
+      console.error("Camera error:", error);
+  
+      if (error.name === 'NotAllowedError') {
+        setCameraError("Camera access denied. Please allow camera permissions.");
+      } else if (error.name === 'NotFoundError') {
+        setCameraError("No camera found on this device.");
+      } else if (error.name === 'NotReadableError') {
+        setCameraError("Camera is being used by another application.");
+      } else {
+        setCameraError("Unable to access camera: " + error.message);
+      }
+    } finally {
+      setIsCameraLoading(false);
+    }
+  };
+  
+  const stopCamera = () => {
+    console.log("🛑 Stopping camera...");
+  
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => {
+        track.stop();
+        console.log("Track stopped:", track.kind);
+      });
+      setCameraStream(null);
+    }
+  
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  
+    setIsCameraOpen(false);
+    setCameraError("");
+    setIsCameraLoading(false);
+    setCurrentCaptureId(null);
+  
+    console.log("✅ Camera stopped successfully");
+  };
+  
+  const capturePhoto = async () => {
+    if (!videoRef.current || !currentCaptureId) {
+      alert("Camera not initialized. Please try again.");
+      return;
+    }
+  
+    const video = videoRef.current;
+  
+    try {
+      console.log("🔍 Video readyState:", video.readyState);
+      console.log("🔍 Video dimensions:", video.videoWidth, "x", video.videoHeight);
+  
+      if (video.readyState < 2) {
+        alert("Camera is still loading. Please wait a moment and try again.");
+        return;
+      }
+  
+      if (!video.videoWidth || !video.videoHeight) {
+        alert("Camera dimensions not available. Please restart camera.");
+        return;
+      }
+  
+      if (!cameraStream || !cameraStream.active) {
+        alert("Camera stream not active. Please restart camera.");
+        return;
+      }
+  
+      console.log("📸 Starting photo capture...");
+  
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+  
+      const context = canvas.getContext('2d');
+      if (!context) {
+        alert("Failed to create canvas context");
+        return;
+      }
+  
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error("Failed to create blob"));
+            }
+          },
+          'image/jpeg',
+          0.92
+        );
+      });
+  
+      console.log("✅ Photo captured! Size:", (blob.size / 1024).toFixed(2), "KB");
+  
+      const file = new File(
+        [blob],
+        `camera-${Date.now()}.jpg`,
+        { type: 'image/jpeg' }
+      );
+  
+      stopCamera();
+  
+      handleImageUpload(currentCaptureId, { target: { files: [file] } });
+  
+      alert("✅ Photo captured successfully!");
+  
+    } catch (error) {
+      console.error("❌ Capture error:", error);
+      alert("Failed to capture photo: " + error.message);
+    }
+  };
+  
 
   const isAdmin = userRole === "admin";
   // UPDATED: Format date-time to DD/MM/YYYY HH:MM:SS
@@ -798,13 +1009,12 @@ function AccountDataPage() {
   );
 
   const handleImageUpload = async (id, e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    // console.log(`Image upload for: ${id}`)
-    setAccountData((prev) =>
-      prev.map((item) => (item._id === id ? { ...item, image: file } : item))
-    );
-  };
+    const file = e.target.files[0]
+    if (!file) return
+
+    console.log(`Image upload for: ${id}`)
+    setAccountData((prev) => prev.map((item) => (item._id === id ? { ...item, image: file } : item)))
+  }
 
   const fileToBase64 = (file) => {
     return new Promise((resolve, reject) => {
@@ -1970,71 +2180,70 @@ function AccountDataPage() {
                               />
                             </td>
                             <td className="px-3 py-4 bg-green-50 min-w-[120px]">
-                              {account.image ? (
-                                <div className="flex items-center">
-                                  <img
-                                    src={
-                                      typeof account.image === "string"
-                                        ? account.image
-                                        : URL.createObjectURL(account.image)
-                                    }
-                                    alt="Receipt"
-                                    className="h-10 w-10 object-cover rounded-md mr-2 flex-shrink-0"
-                                  />
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="text-xs text-gray-500 break-words">
-                                      {account.image instanceof File
-                                        ? account.image.name
-                                        : "Uploaded Receipt"}
-                                    </span>
-                                    {account.image instanceof File ? (
-                                      <span className="text-xs text-green-600">
-                                        Ready to upload
-                                      </span>
-                                    ) : (
-                                      <button
-                                        className="text-xs text-purple-600 hover:text-purple-800 break-words"
-                                        onClick={() =>
-                                          window.open(account.image, "_blank")
-                                        }
-                                      >
-                                        View Full Image
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : (
-                                <label
-                                  className={`flex items-center cursor-pointer ${
-                                    account["col9"]?.toUpperCase() === "YES"
-                                      ? "text-red-600 font-medium"
-                                      : "text-purple-600"
-                                  } hover:text-purple-800`}
-                                >
-                                  <Upload className="h-4 w-4 mr-1 flex-shrink-0" />
-                                  <span className="text-xs break-words">
-                                    {account["col9"]?.toUpperCase() === "YES"
-                                      ? "Required Upload"
-                                      : "Upload Receipt Image"}
-                                    {account["col9"]?.toUpperCase() ===
-                                      "YES" && (
-                                      <span className="text-red-500 ml-1">
-                                        *
-                                      </span>
-                                    )}
-                                  </span>
-                                  <input
-                                    type="file"
-                                    className="hidden"
-                                    accept="image/*"
-                                    onChange={(e) =>
-                                      handleImageUpload(account._id, e)
-                                    }
-                                    disabled={!isSelected}
-                                  />
-                                </label>
-                              )}
-                            </td>
+                {account.image ? (
+                  <div className="flex items-center">
+                    <img
+                      src={typeof account.image === "string" ? account.image : URL.createObjectURL(account.image)}
+                      alt="Receipt"
+                      className="h-10 w-10 object-cover rounded-md mr-2 flex-shrink-0"
+                    />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-gray-500 break-words">
+                        {account.image instanceof File ? account.image.name : "Uploaded Receipt"}
+                      </span>
+                      {account.image instanceof File ? (
+                        <span className="text-xs text-green-600">Ready to upload</span>
+                      ) : (
+                        <button
+                          className="text-xs text-purple-600 hover:text-purple-800 break-words"
+                          onClick={() => window.open(account.image, "_blank")}
+                        >
+                          View Full Image
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {/* File Upload Button */}
+                    <label
+                      htmlFor={`upload-${account._id}`}
+                      className={`flex items-center cursor-pointer ${
+                        account["col9"]?.toUpperCase() === "YES" ? "text-red-600 font-medium" : "text-purple-600"
+                      } hover:text-purple-800`}
+                    >
+                      <Upload className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span className="text-xs break-words">
+                        {account["col9"]?.toUpperCase() === "YES" ? "Required Upload" : "Upload Receipt"}
+                        {account["col9"]?.toUpperCase() === "YES" && <span className="text-red-500 ml-1">*</span>}
+                      </span>
+                    </label>
+
+                    <input
+                      id={`upload-${account._id}`}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleImageUpload(account._id, e)}
+                      disabled={!isSelected}
+                    />
+
+                    {/* Camera Capture Button */}
+                    <button
+                      onClick={() => {
+                        setCurrentCaptureId(account._id);
+                        startCamera();
+                      }}
+                      disabled={!isSelected || isCameraLoading}
+                      className="flex items-center text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Camera className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>{isCameraLoading ? "Loading..." : "Take Photo"}</span>
+                    </button>
+                  </div>
+                )}
+              </td>
                           </tr>
                         );
                       })
@@ -2247,69 +2456,69 @@ function AccountDataPage() {
                           </div>
 
                           {/* Upload Image */}
-                          <div className="flex justify-between items-center">
-                            <span className="font-medium text-gray-700">
-                              Attachment:
-                            </span>
-                            {account.image ? (
-                              <div className="flex items-center">
-                                <img
-                                  src={
-                                    typeof account.image === "string"
-                                      ? account.image
-                                      : URL.createObjectURL(account.image)
-                                  }
-                                  alt="Receipt"
-                                  className="h-10 w-10 object-cover rounded-md mr-2 flex-shrink-0"
-                                />
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-gray-500 break-words">
-                                    {account.image instanceof File
-                                      ? account.image.name
-                                      : "Uploaded"}
-                                  </span>
-                                  {account.image instanceof File ? (
-                                    <span className="text-xs text-green-600">
-                                      Ready to upload
-                                    </span>
-                                  ) : (
-                                    <button
-                                      className="text-xs text-purple-600 hover:text-purple-800 break-words"
-                                      onClick={() =>
-                                        window.open(account.image, "_blank")
-                                      }
-                                    >
-                                      View
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <label
-                                className={`flex items-center cursor-pointer ${
-                                  account["col9"]?.toUpperCase() === "YES"
-                                    ? "text-red-600 font-medium"
-                                    : "text-purple-600"
-                                } hover:text-purple-800`}
-                              >
-                                <Upload className="h-4 w-4 mr-1 flex-shrink-0" />
-                                <span className="text-xs break-words">
-                                  {account["col9"]?.toUpperCase() === "YES"
-                                    ? "Required*"
-                                    : "Upload"}
-                                </span>
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  accept="image/*"
-                                  onChange={(e) =>
-                                    handleImageUpload(account._id, e)
-                                  }
-                                  disabled={!isSelected}
-                                />
-                              </label>
-                            )}
-                          </div>
+                          <div className="text-sm">
+              Upload Image:{" "}
+              {account.image ? (
+                <div className="flex items-center">
+                  <img
+                    src={typeof account.image === "string" ? account.image : URL.createObjectURL(account.image)}
+                    alt="Receipt"
+                    className="h-10 w-10 object-cover rounded-md mr-2 flex-shrink-0"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs text-gray-500 break-words">
+                      {account.image instanceof File ? account.image.name : "Uploaded Receipt"}
+                    </span>
+                    {account.image instanceof File ? (
+                      <span className="text-xs text-green-600">Ready to upload</span>
+                    ) : (
+                      <button className="text-xs text-purple-600 hover:text-purple-800 break-words" onClick={() => window.open(account.image, "_blank")}>
+                        View Full Image
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                    {/* File Upload Button */}
+                    <label
+                      htmlFor={`upload-${account._id}`}
+                      className={`flex items-center cursor-pointer ${
+                        account["col9"]?.toUpperCase() === "YES" ? "text-red-600 font-medium" : "text-purple-600"
+                      } hover:text-purple-800`}
+                    >
+                      <Upload className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span className="text-xs break-words">
+                        {account["col9"]?.toUpperCase() === "YES" ? "Required Upload" : "Upload Receipt"}
+                        {account["col9"]?.toUpperCase() === "YES" && <span className="text-red-500 ml-1">*</span>}
+                      </span>
+                    </label>
+
+                    <input
+                      id={`upload-${account._id}`}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleImageUpload(account._id, e)}
+                      disabled={!isSelected}
+                    />
+
+                    {/* Camera Capture Button */}
+                    <button
+                      onClick={() => {
+                        setCurrentCaptureId(account._id);
+                        startCamera();
+                      }}
+                      disabled={!isSelected || isCameraLoading}
+                      className="flex items-center text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Camera className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>{isCameraLoading ? "Loading..." : "Take Photo"}</span>
+                    </button>
+                  </div>
+              )}
+            </div>
                         </div>
                       </div>
                     );
@@ -2325,6 +2534,64 @@ function AccountDataPage() {
             </>
           )}
         </div>
+        {isCameraOpen && (
+  <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full overflow-hidden">
+      <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between">
+        <h3 className="text-lg font-semibold">📸 Take Photo</h3>
+        <button
+          onClick={stopCamera}
+          className="text-white hover:text-gray-200 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="relative bg-black">
+        <video
+          ref={videoRef}
+          className="w-full h-[400px] object-cover"
+          autoPlay
+          playsInline
+          muted
+        />
+
+        {isCameraLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="text-white text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent mx-auto mb-3"></div>
+              <p>Initializing camera...</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {cameraError && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4">
+          <p className="text-sm text-red-700">{cameraError}</p>
+        </div>
+      )}
+
+      <div className="p-4 bg-gray-50 flex gap-3 justify-end">
+        <button
+          type="button"
+          onClick={stopCamera}
+          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={capturePhoto}
+          disabled={isCameraLoading}
+          className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          📸 Capture Photo
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       </div>
     </AdminLayout>
   );
