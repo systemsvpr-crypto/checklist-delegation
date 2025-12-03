@@ -78,7 +78,7 @@ const CalendarUI = ({ userRole, userName, displayName }) => {
   const BACKEND_URL =
     sessionStorage.getItem("userAppScriptUrl") ||
     sessionStorage.getItem("apiUrl") ||
-    "https://script.google.com/macros/s/AKfycbzXzqnKmbeXw3i6kySQcBOwxHQA7y8WBFfEe69MPbCR-jux0Zte7-TeSKi8P4CIFkhE/exec";
+    "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec";
 
   console.log("Using Backend URL:", BACKEND_URL);
 

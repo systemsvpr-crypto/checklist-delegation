@@ -37,13 +37,13 @@
 //   useEffect(() => {
 //     const fetchMasterData = async () => {
 //       const SCRIPT_URL =
-//         "https://script.google.com/macros/s/AKfycbzXzqnKmbeXw3i6kySQcBOwxHQA7y8WBFfEe69MPbCR-jux0Zte7-TeSKi8P4CIFkhE/exec";
+//         "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec";
 
 //       try {
 //         setIsDataLoading(true);
 
 //         // Get the spreadsheet ID from your Apps Script
-//         const SPREADSHEET_ID = "1pjNOV1ogLtiMm-Ow9_UVbsd3oN52jA5FdLGLgKwqlcw";
+//         const SPREADSHEET_ID = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
 
 //         // Construct the URL to read the sheet data directly
 //         const sheetUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=master`;
@@ -403,13 +403,13 @@ const LoginPage = () => {
   useEffect(() => {
     const fetchMasterData = async () => {
       const SCRIPT_URL =
-        "https://script.google.com/macros/s/AKfycbzXzqnKmbeXw3i6kySQcBOwxHQA7y8WBFfEe69MPbCR-jux0Zte7-TeSKi8P4CIFkhE/exec";
+        "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec";
 
       try {
         setIsDataLoading(true);
 
         // Get the spreadsheet ID from your Apps Script
-        const SPREADSHEET_ID = "1pjNOV1ogLtiMm-Ow9_UVbsd3oN52jA5FdLGLgKwqlcw";
+        const SPREADSHEET_ID = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
 
         // Construct the URL to read the sheet data directly
         const sheetUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=master`;

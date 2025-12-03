@@ -4,7 +4,7 @@ const AllTasks = () => {
   // Google Sheets configuration
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz47q4SiLvJJom8dRGteqjhufs0Iui4rYTLMeTYqOgY_MFrS0C0o0XkRCPzAOdEeg4jqg/exec"
   const SHEET_NAME = "DATA"
-  const SHEET_ID = "1pjNOV1ogLtiMm-Ow9_UVbsd3oN52jA5FdLGLgKwqlcw" // Your specific sheet ID
+  const SHEET_ID = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94" // Your specific sheet ID
 
   const [tasks, setTasks] = useState([])
   const [tableHeaders, setTableHeaders] = useState([])

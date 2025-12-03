@@ -357,7 +357,7 @@ function AccountDataPage() {
       const pendingAccounts = [];
       const historyRows = [];
 
-      const response = await fetch(`https://docs.google.com/spreadsheets/d/1pjNOV1ogLtiMm-Ow9_UVbsd3oN52jA5FdLGLgKwqlcw/gviz/tq?tqx=out:json&sheet=STORE`);
+      const response = await fetch(`https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec/gviz/tq?tqx=out:json&sheet=STORE`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.status}`);
