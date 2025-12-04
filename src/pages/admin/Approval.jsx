@@ -1,3 +1,4 @@
+
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
@@ -59,6 +60,10 @@ function Approval() {
   const [editingRows, setEditingRows] = useState(new Set());
   const [editedAdminStatus, setEditedAdminStatus] = useState({});
   const [savingEdits, setSavingEdits] = useState(new Set());
+
+
+  const [delegationHistoryData, setDelegationHistoryData] = useState([]);
+const [activeApprovalTab, setActiveApprovalTab] = useState('checklist');
 
   const isAdmin = userRole === "admin";
   // UPDATED: Format date-time to DD/MM/YYYY HH:MM:SS
@@ -188,40 +193,38 @@ function Approval() {
   const handleSaveEdit = async (historyItem) => {
     const rowId = historyItem._id;
     const newStatus = editedAdminStatus[rowId];
-
+    const sheetType = historyItem._sheetType || 'checklist';
+    const targetSheet = sheetType === 'delegation' ? 'Delegation' : CONFIG.SHEET_NAME;
+  
     if (savingEdits.has(rowId)) return;
-
+  
     setSavingEdits((prev) => new Set([...prev, rowId]));
-
+  
     try {
-      // Different approaches for clearing vs setting
       const statusToSend =
         newStatus === "" || newStatus === undefined ? "" : newStatus;
-
+  
       const submissionData = [
         {
           taskId: historyItem._taskId || historyItem["col1"],
           rowIndex: historyItem._rowIndex,
-          adminDoneStatus: statusToSend, // Send empty string to clear, "Done" to set
+          adminDoneStatus: statusToSend,
+          sheetType: sheetType,
         },
       ];
-
-      // console.log('Submission Data:', JSON.stringify(submissionData, null, 2))
-
+  
       const formData = new FormData();
-      formData.append("sheetName", CONFIG.SHEET_NAME);
+      formData.append("sheetName", targetSheet);
       formData.append("action", "updateAdminDone");
       formData.append("rowData", JSON.stringify(submissionData));
-
-      // console.log('Making API request...')
+  
       const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
         method: "POST",
         body: formData,
       });
-
+  
       const responseText = await response.text();
-    //   console.log("Raw Response:", responseText);
-
+  
       let result;
       try {
         result = JSON.parse(responseText);
@@ -229,40 +232,41 @@ function Approval() {
         console.error("JSON Parse Error:", parseError);
         throw new Error(`Invalid response format: ${responseText}`);
       }
-
-      // console.log('Parsed Result:', result)
-
+  
       if (result.success) {
-        // Update local state - use empty string for cleared status
         const updatedStatus =
           newStatus === "" || newStatus === undefined ? "" : newStatus;
-
-        // console.log('Updating local state with:', updatedStatus)
-
-        setHistoryData((prev) =>
-          prev.map((item) =>
-            item._id === rowId ? { ...item, col15: updatedStatus } : item
-          )
-        );
-
-        // Exit edit mode
+  
+        // Update the correct history data based on sheet type
+        if (sheetType === 'delegation') {
+          setDelegationHistoryData((prev) =>
+            prev.map((item) =>
+              item._id === rowId ? { ...item, col19: updatedStatus } : item
+            )
+          );
+        } else {
+          setHistoryData((prev) =>
+            prev.map((item) =>
+              item._id === rowId ? { ...item, col15: updatedStatus } : item
+            )
+          );
+        }
+  
         setEditingRows((prev) => {
           const newSet = new Set(prev);
           newSet.delete(rowId);
           return newSet;
         });
-
+  
         setEditedAdminStatus((prev) => {
           const newStatusObj = { ...prev };
           delete newStatusObj[rowId];
           return newStatusObj;
         });
-
+  
         setSuccessMessage("Admin status updated successfully!");
-
-        // Refresh data after a short delay
+  
         setTimeout(() => {
-          // console.log('Refreshing data...')
           fetchSheetData();
         }, 3000);
       } else {
@@ -348,54 +352,89 @@ function Approval() {
     );
   };
 
-  // UPDATED: Admin Done submission handler - Store "Done" text instead of timestamp
   const confirmMarkDone = async () => {
-    // Close the modal
     setConfirmationModal({ isOpen: false, itemCount: 0 });
     setMarkingAsDone(true);
-
+  
     try {
-      // Prepare submission data for multiple items
-      const submissionData = selectedHistoryItems.map((historyItem) => ({
-        taskId: historyItem._taskId || historyItem["col1"],
-        rowIndex: historyItem._rowIndex,
-        adminDoneStatus: "Done", // This will update Column P
-      }));
-
-      const formData = new FormData();
-      formData.append("sheetName", CONFIG.SHEET_NAME);
-      formData.append("action", "updateAdminDone"); // Use the new action name
-      formData.append("rowData", JSON.stringify(submissionData));
-
-      const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
-        method: "POST",
-        body: formData,
-      });
-      const result = await response.json();
-
-      if (result.success) {
-        // Remove processed items from history view
-        setHistoryData((prev) =>
-          prev.filter(
-            (item) =>
-              !selectedHistoryItems.some(
-                (selected) => selected._id === item._id
-              )
-          )
-        );
-
-        setSelectedHistoryItems([]);
-        setSuccessMessage(
-          `Successfully marked ${selectedHistoryItems.length} items as Admin Done!`
-        );
-
-        // Refresh data
-        setTimeout(() => {
-          fetchSheetData();
-        }, 2000);
-      } else {
-        throw new Error(result.error || "Failed to mark items as Admin Done");
+      const checklistItems = selectedHistoryItems.filter(item => item._sheetType === 'checklist');
+      const delegationItems = selectedHistoryItems.filter(item => item._sheetType === 'delegation');
+  
+      // Submit checklist items
+      if (checklistItems.length > 0) {
+        const checklistSubmissionData = checklistItems.map((historyItem) => ({
+          taskId: historyItem._taskId || historyItem["col1"],
+          rowIndex: historyItem._rowIndex,
+          adminDoneStatus: "Done",
+          sheetType: 'checklist',
+        }));
+  
+        const checklistFormData = new FormData();
+        checklistFormData.append("sheetName", CONFIG.SHEET_NAME);
+        checklistFormData.append("action", "updateAdminDone");
+        checklistFormData.append("rowData", JSON.stringify(checklistSubmissionData));
+  
+        const checklistResponse = await fetch(CONFIG.APPS_SCRIPT_URL, {
+          method: "POST",
+          body: checklistFormData,
+        });
+        const checklistResult = await checklistResponse.json();
+        if (!checklistResult.success) {
+          throw new Error(checklistResult.error || "Failed to mark checklist items as Admin Done");
+        }
       }
+  
+      // Submit delegation items
+      if (delegationItems.length > 0) {
+        const delegationSubmissionData = delegationItems.map((historyItem) => ({
+          taskId: historyItem._taskId || historyItem["col1"],
+          rowIndex: historyItem._rowIndex,
+          adminDoneStatus: "Done",
+          sheetType: 'delegation',
+        }));
+  
+        const delegationFormData = new FormData();
+        delegationFormData.append("sheetName", "Delegation");
+        delegationFormData.append("action", "updateAdminDone");
+        delegationFormData.append("rowData", JSON.stringify(delegationSubmissionData));
+  
+        const delegationResponse = await fetch(CONFIG.APPS_SCRIPT_URL, {
+          method: "POST",
+          body: delegationFormData,
+        });
+        const delegationResult = await delegationResponse.json();
+        if (!delegationResult.success) {
+          throw new Error(delegationResult.error || "Failed to mark delegation items as Admin Done");
+        }
+      }
+  
+      // Remove processed items from both history views
+      setHistoryData((prev) =>
+        prev.filter(
+          (item) =>
+            !selectedHistoryItems.some(
+              (selected) => selected._id === item._id
+            )
+        )
+      );
+      
+      setDelegationHistoryData((prev) =>
+        prev.filter(
+          (item) =>
+            !selectedHistoryItems.some(
+              (selected) => selected._id === item._id
+            )
+        )
+      );
+  
+      setSelectedHistoryItems([]);
+      setSuccessMessage(
+        `Successfully marked ${selectedHistoryItems.length} items as Admin Done!`
+      );
+  
+      setTimeout(() => {
+        fetchSheetData();
+      }, 2000);
     } catch (error) {
       console.error("Error marking tasks as Admin Done:", error);
       setSuccessMessage(`Failed to mark tasks as Admin Done: ${error.message}`);
@@ -449,6 +488,54 @@ function Approval() {
       });
   }, [historyData, searchTerm, selectedMembers, startDate, endDate]);
 
+
+
+  const filteredDelegationHistoryData = useMemo(() => {
+    return delegationHistoryData
+      .filter((item) => {
+        const matchesSearch = searchTerm
+          ? Object.values(item).some(
+              (value) =>
+                value &&
+                value
+                  .toString()
+                  .toLowerCase()
+                  .includes(searchTerm.toLowerCase())
+            )
+          : true;
+        const matchesMember =
+          selectedMembers.length > 0
+            ? selectedMembers.includes(item["col4"])
+            : true;
+        let matchesDateRange = true;
+        if (startDate || endDate) {
+          const itemDate = parseDateFromDDMMYYYY(item["col10"]);
+          if (!itemDate) return false;
+          if (startDate) {
+            const startDateObj = new Date(startDate);
+            startDateObj.setHours(0, 0, 0, 0);
+            if (itemDate < startDateObj) matchesDateRange = false;
+          }
+          if (endDate) {
+            const endDateObj = new Date(endDate);
+            endDateObj.setHours(23, 59, 59, 999);
+            if (itemDate > endDateObj) matchesDateRange = false;
+          }
+        }
+        return matchesSearch && matchesMember && matchesDateRange;
+      })
+      .sort((a, b) => {
+        const dateStrA = a["col10"] || "";
+        const dateStrB = b["col10"] || "";
+        const dateA = parseDateFromDDMMYYYY(dateStrA);
+        const dateB = parseDateFromDDMMYYYY(dateStrB);
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateB.getTime() - dateA.getTime();
+      });
+  }, [delegationHistoryData, searchTerm, selectedMembers, startDate, endDate]);
+
+
   const getTaskStatistics = () => {
     const totalCompleted = historyData.length;
     const memberStats =
@@ -491,33 +578,54 @@ function Approval() {
     }
   };
 
-  // UPDATED: fetchSheetData - Include all history rows regardless of Column P status
   const fetchSheetData = useCallback(async () => {
     try {
       setLoading(true);
-      const pendingAccounts = [];
-      const historyRows = [];
-      const response = await fetch(
+      
+      // Fetch Checklist data
+      const checklistResponse = await fetch(
         `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.SHEET_NAME}&action=fetch`
       );
-      if (!response.ok) {
-        throw new Error(`Failed to fetch data: ${response.status}`);
+      if (!checklistResponse.ok) {
+        throw new Error(`Failed to fetch checklist data: ${checklistResponse.status}`);
       }
-      const text = await response.text();
-      let data;
+      const checklistText = await checklistResponse.text();
+      let checklistData;
       try {
-        data = JSON.parse(text);
+        checklistData = JSON.parse(checklistText);
       } catch (parseError) {
-        const jsonStart = text.indexOf("{");
-        const jsonEnd = text.lastIndexOf("}");
+        const jsonStart = checklistText.indexOf("{");
+        const jsonEnd = checklistText.lastIndexOf("}");
         if (jsonStart !== -1 && jsonEnd !== -1) {
-          const jsonString = text.substring(jsonStart, jsonEnd + 1);
-          data = JSON.parse(jsonString);
+          const jsonString = checklistText.substring(jsonStart, jsonEnd + 1);
+          checklistData = JSON.parse(jsonString);
         } else {
           throw new Error("Invalid JSON response from server");
         }
       }
-
+  
+      // Fetch Delegation data
+      const delegationResponse = await fetch(
+        `${CONFIG.APPS_SCRIPT_URL}?sheet=Delegation&action=fetch`
+      );
+      if (!delegationResponse.ok) {
+        throw new Error(`Failed to fetch delegation data: ${delegationResponse.status}`);
+      }
+      const delegationText = await delegationResponse.text();
+      let delegationData;
+      try {
+        delegationData = JSON.parse(delegationText);
+      } catch (parseError) {
+        const jsonStart = delegationText.indexOf("{");
+        const jsonEnd = delegationText.lastIndexOf("}");
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          const jsonString = delegationText.substring(jsonStart, jsonEnd + 1);
+          delegationData = JSON.parse(jsonString);
+        } else {
+          throw new Error("Invalid JSON response from server");
+        }
+      }
+  
       const currentUsername = sessionStorage.getItem("username");
       const currentUserRole = sessionStorage.getItem("role");
       const today = new Date();
@@ -525,138 +633,155 @@ function Approval() {
       tomorrow.setDate(today.getDate() + 1);
       const todayStr = formatDateToDDMMYYYY(today);
       const tomorrowStr = formatDateToDDMMYYYY(tomorrow);
-      // console.log("Filtering dates:", { todayStr, tomorrowStr })
-
+  
       const membersSet = new Set();
-      let rows = [];
-      if (data.table && data.table.rows) {
-        rows = data.table.rows;
-      } else if (Array.isArray(data)) {
-        rows = data;
-      } else if (data.values) {
-        rows = data.values.map((row) => ({
-          c: row.map((val) => ({ v: val })),
-        }));
-      }
-
-      rows.forEach((row, rowIndex) => {
-        if (rowIndex === 0) return;
-        let rowValues = [];
-        if (row.c) {
-          rowValues = row.c.map((cell) =>
-            cell && cell.v !== undefined ? cell.v : ""
-          );
-        } else if (Array.isArray(row)) {
-          rowValues = row;
-        } else {
-          // console.log("Unknown row format:", row)
-          return;
+      
+      // Process Checklist data
+      const processSheetData = (data, sheetType) => {
+        const historyRows = [];
+        let rows = [];
+        
+        if (data.table && data.table.rows) {
+          rows = data.table.rows;
+        } else if (Array.isArray(data)) {
+          rows = data;
+        } else if (data.values) {
+          rows = data.values.map((row) => ({
+            c: row.map((val) => ({ v: val })),
+          }));
         }
-
-        const assignedTo = rowValues[4] || "Unassigned";
-        membersSet.add(assignedTo);
-        const isUserMatch =
-          currentUserRole === "admin" ||
-          assignedTo.toLowerCase() === currentUsername.toLowerCase();
-        if (!isUserMatch && currentUserRole !== "admin") return;
-
-        const columnGValue = rowValues[6]; // Task Start Date
-        const columnKValue = rowValues[10]; // Actual Date
-        const columnMValue = rowValues[12]; // Status (DONE)
-        const columnPValue = rowValues[15]; // Admin Processed Date (Column P)
-
-        // Skip rows marked as DONE in column M for pending tasks only
-        if (columnMValue && columnMValue.toString().trim() === "DONE") {
-          return;
-        }
-
-        const rowDateStr = columnGValue ? String(columnGValue).trim() : "";
-        const formattedRowDate = parseGoogleSheetsDateTime(rowDateStr);
-        const googleSheetsRowIndex = rowIndex + 1;
-
-        // Create stable unique ID using task ID and row index
-        const taskId = rowValues[1] || "";
-        const stableId = taskId
-          ? `task_${taskId}_${googleSheetsRowIndex}`
-          : `row_${googleSheetsRowIndex}_${Math.random()
-              .toString(36)
-              .substring(2, 15)}`;
-
-        const rowData = {
-          _id: stableId,
-          _rowIndex: googleSheetsRowIndex,
-          _taskId: taskId,
-        };
-
-        const columnHeaders = [
-          { id: "col0", label: "Timestamp", type: "string" },
-          { id: "col1", label: "Task ID", type: "string" },
-          { id: "col2", label: "Firm", type: "string" },
-          { id: "col3", label: "Given By", type: "string" },
-          { id: "col4", label: "Name", type: "string" },
-          { id: "col5", label: "Task Description", type: "string" },
-          { id: "col6", label: "Task Start Date", type: "datetime" },
-          { id: "col7", label: "Freq", type: "string" },
-          { id: "col8", label: "Enable Reminders", type: "string" },
-          { id: "col9", label: "Require Attachment", type: "string" },
-          { id: "col10", label: "Actual", type: "datetime" },
-          { id: "col11", label: "Column L", type: "string" },
-          { id: "col12", label: "Status", type: "string" },
-          { id: "col13", label: "Remarks", type: "string" },
-          { id: "col14", label: "Uploaded Image", type: "string" },
-          { id: "col15", label: "Admin Done", type: "string" }, // Column P
-        ];
-
-        columnHeaders.forEach((header, index) => {
-          const cellValue = rowValues[index];
-          if (
-            header.type === "datetime" ||
-            header.type === "date" ||
-            (cellValue && String(cellValue).startsWith("Date("))
-          ) {
-            rowData[header.id] = cellValue
-              ? parseGoogleSheetsDateTime(String(cellValue))
-              : "";
-          } else if (
-            header.type === "number" &&
-            cellValue !== null &&
-            cellValue !== ""
-          ) {
-            rowData[header.id] = cellValue;
+  
+        rows.forEach((row, rowIndex) => {
+          if (rowIndex === 0) return;
+          let rowValues = [];
+          if (row.c) {
+            rowValues = row.c.map((cell) =>
+              cell && cell.v !== undefined ? cell.v : ""
+            );
+          } else if (Array.isArray(row)) {
+            rowValues = row;
           } else {
-            rowData[header.id] = cellValue !== null ? cellValue : "";
+            return;
           }
-        });
-
-        // console.log(`Row ${rowIndex}: Task ID = ${rowData.col1}, Google Sheets Row = ${googleSheetsRowIndex}`)
-
-        const hasColumnG = !isEmpty(columnGValue);
-        const isColumnKEmpty = isEmpty(columnKValue);
-
-        // For pending tasks, exclude admin processed items (Column P not empty)
-        if (hasColumnG && isColumnKEmpty && isEmpty(columnPValue)) {
-          const rowDate = parseDateFromDDMMYYYY(formattedRowDate);
-          const isToday = formattedRowDate.startsWith(todayStr);
-          // const isTomorrow = formattedRowDate.startsWith(tomorrowStr)
-          const isPastDate = rowDate && rowDate < today;
-          if (isToday || isPastDate) {
-            pendingAccounts.push(rowData);
-          }
-        }
-        // For history, include ALL completed tasks regardless of Column P status
-        else if (hasColumnG && !isColumnKEmpty) {
-          const isUserHistoryMatch =
+  
+          const assignedTo = rowValues[4] || "Unassigned";
+          membersSet.add(assignedTo);
+          const isUserMatch =
             currentUserRole === "admin" ||
             assignedTo.toLowerCase() === currentUsername.toLowerCase();
-          if (isUserHistoryMatch) {
-            historyRows.push(rowData);
+          if (!isUserMatch && currentUserRole !== "admin") return;
+  
+          const columnGValue = rowValues[6]; // Task Start Date
+          const columnKValue = rowValues[10]; // Actual Date
+          const columnMValue = rowValues[12]; // Status (DONE)
+          const columnPValue = sheetType === 'checklist' ? rowValues[15] : rowValues[19]; // Admin Done column
+  
+          if (columnMValue && columnMValue.toString().trim() === "DONE") {
+            return;
           }
-        }
-      });
-
+  
+          const rowDateStr = columnGValue ? String(columnGValue).trim() : "";
+          const formattedRowDate = parseGoogleSheetsDateTime(rowDateStr);
+          const googleSheetsRowIndex = rowIndex + 1;
+  
+          const taskId = rowValues[1] || "";
+          const stableId = taskId
+            ? `${sheetType}_task_${taskId}_${googleSheetsRowIndex}`
+            : `${sheetType}_row_${googleSheetsRowIndex}_${Math.random()
+                .toString(36)
+                .substring(2, 15)}`;
+  
+          const rowData = {
+            _id: stableId,
+            _rowIndex: googleSheetsRowIndex,
+            _taskId: taskId,
+            _sheetType: sheetType,
+          };
+  
+          const columnHeaders = sheetType === 'checklist' ? [
+            { id: "col0", label: "Timestamp", type: "string" },
+            { id: "col1", label: "Task ID", type: "string" },
+            { id: "col2", label: "Firm", type: "string" },
+            { id: "col3", label: "Given By", type: "string" },
+            { id: "col4", label: "Name", type: "string" },
+            { id: "col5", label: "Task Description", type: "string" },
+            { id: "col6", label: "Task Start Date", type: "datetime" },
+            { id: "col7", label: "Freq", type: "string" },
+            { id: "col8", label: "Enable Reminders", type: "string" },
+            { id: "col9", label: "Require Attachment", type: "string" },
+            { id: "col10", label: "Actual", type: "datetime" },
+            { id: "col11", label: "Column L", type: "string" },
+            { id: "col12", label: "Status", type: "string" },
+            { id: "col13", label: "Remarks", type: "string" },
+            { id: "col14", label: "Uploaded Image", type: "string" },
+            { id: "col15", label: "Admin Done", type: "string" }, // Column P for Checklist
+          ] : [
+            { id: "col0", label: "Timestamp", type: "string" },
+            { id: "col1", label: "Task ID", type: "string" },
+            { id: "col2", label: "Firm", type: "string" },
+            { id: "col3", label: "Given By", type: "string" },
+            { id: "col4", label: "Name", type: "string" },
+            { id: "col5", label: "Task Description", type: "string" },
+            { id: "col6", label: "Task Start Date", type: "datetime" },
+            { id: "col7", label: "Freq", type: "string" },
+            { id: "col8", label: "Enable Reminders", type: "string" },
+            { id: "col9", label: "Require Attachment", type: "string" },
+            { id: "col10", label: "Actual", type: "datetime" },
+            { id: "col11", label: "Column L", type: "string" },
+            { id: "col12", label: "Status", type: "string" },
+            { id: "col13", label: "Remarks", type: "string" },
+            { id: "col14", label: "Uploaded Image", type: "string" },
+            { id: "col15", label: "Column P", type: "string" },
+            { id: "col16", label: "Column Q", type: "string" },
+            { id: "col17", label: "Column R", type: "string" },
+            { id: "col18", label: "Column S", type: "string" },
+            { id: "col19", label: "Admin Done", type: "string" }, // Column T for Delegation
+          ];
+  
+          columnHeaders.forEach((header, index) => {
+            const cellValue = rowValues[index];
+            if (
+              header.type === "datetime" ||
+              header.type === "date" ||
+              (cellValue && String(cellValue).startsWith("Date("))
+            ) {
+              rowData[header.id] = cellValue
+                ? parseGoogleSheetsDateTime(String(cellValue))
+                : "";
+            } else if (
+              header.type === "number" &&
+              cellValue !== null &&
+              cellValue !== ""
+            ) {
+              rowData[header.id] = cellValue;
+            } else {
+              rowData[header.id] = cellValue !== null ? cellValue : "";
+            }
+          });
+  
+          const hasColumnG = !isEmpty(columnGValue);
+          const isColumnKEmpty = isEmpty(columnKValue);
+  
+          // For history, include ALL completed tasks regardless of Column P/T status
+          if (hasColumnG && !isColumnKEmpty) {
+            const isUserHistoryMatch =
+              currentUserRole === "admin" ||
+              assignedTo.toLowerCase() === currentUsername.toLowerCase();
+            if (isUserHistoryMatch) {
+              historyRows.push(rowData);
+            }
+          }
+        });
+        
+        return historyRows;
+      };
+  
+      const checklistHistory = processSheetData(checklistData, 'checklist');
+      const delegationHistory = processSheetData(delegationData, 'delegation');
+  
       setMembersList(Array.from(membersSet).sort());
-      setAccountData(pendingAccounts);
-      setHistoryData(historyRows);
+      setHistoryData(checklistHistory);
+      setDelegationHistoryData(delegationHistory);
       setLoading(false);
     } catch (error) {
       console.error("Error fetching sheet data:", error);
@@ -686,45 +811,37 @@ function Approval() {
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-bold tracking-tight text-purple-700 text-center sm:text-left">
-            {CONFIG.PAGE_CONFIG.historyTitle}
-          </h1>
-
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
-            {/* Search box */}
-            <div className="relative w-full sm:w-64">
-              <Search
-                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                size={18}
-              />
-              <input
-                type="text"
-                placeholder={"Search history..."}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 w-full"
-              />
-            </div>
-
-            {/* Admin Submit Button for History View */}
-            {showHistory &&
-              userRole === "admin" &&
-              selectedHistoryItems.length > 0 && (
-                <div className="fixed bottom-6 right-6 sm:top-40 sm:right-10 z-50">
-                  <button
-                    onClick={handleMarkMultipleDone}
-                    disabled={markingAsDone}
-                    className="rounded-md bg-green-600 text-white px-4 py-2 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-                  >
-                    {markingAsDone
-                      ? "Processing..."
-                      : `Mark ${selectedHistoryItems.length} Items as Admin Done`}
-                  </button>
-                </div>
-              )}
-          </div>
-        </div>
+      <div className="flex flex-col gap-4">
+  <div>
+    <h1 className="text-2xl font-bold tracking-tight text-purple-700 text-center sm:text-left">
+      {CONFIG.PAGE_CONFIG.historyTitle}
+    </h1>
+    
+    {/* Tab Buttons */}
+    <div className="flex gap-2 mt-2">
+      <button
+        onClick={() => setActiveApprovalTab('checklist')}
+        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+          activeApprovalTab === 'checklist'
+            ? 'bg-purple-600 text-white'
+            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+        }`}
+      >
+        Checklist Tasks
+      </button>
+      <button
+        onClick={() => setActiveApprovalTab('delegation')}
+        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+          activeApprovalTab === 'delegation'
+            ? 'bg-purple-600 text-white'
+            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+        }`}
+      >
+        Delegation Tasks
+      </button>
+    </div>
+  </div>
+        
 
         {successMessage && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md flex items-center justify-between">
@@ -964,485 +1081,448 @@ function Approval() {
                 </div>
               </div>
 
-              {/* History Table - Optimized for performance */}
-              <div className="hidden sm:block h-[calc(100vh-300px)] overflow-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0 z-10">
-                    <tr>
-                      {/* NEW: Admin Done Column - NOW FIRST */}
-                      {userRole === "admin" && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 min-w-[160px]">
-                          Admin Done
-                        </th>
-                      )}
+            {/* History Table - Based on Active Tab */}
+<div className="hidden sm:block h-[calc(100vh-300px)] overflow-auto">
+  <table className="min-w-full divide-y divide-gray-200">
+    <thead className="bg-gray-50 sticky top-0 z-10">
+      <tr>
+        {/* Admin Done Column - NOW FIRST */}
+        {userRole === "admin" && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 min-w-[160px]">
+            Admin Done
+          </th>
+        )}
 
-                      {/* Admin Select Column Header */}
-                      {userRole === "admin" && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                          <div className="flex flex-col items-center">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                              checked={
-                                filteredHistoryData.filter(
-                                  (item) =>
-                                    isEmpty(item["col15"]) ||
-                                    (item["col15"].toString().trim() !==
-                                      "Done" &&
-                                      item["col15"].toString().trim() !==
-                                        "Not Done")
-                                ).length > 0 &&
-                                selectedHistoryItems.length ===
-                                  filteredHistoryData.filter(
-                                    (item) =>
-                                      isEmpty(item["col15"]) ||
-                                      (item["col15"].toString().trim() !==
-                                        "Done" &&
-                                        item["col15"].toString().trim() !==
-                                          "Not Done")
-                                  ).length
-                              }
-                              onChange={(e) => {
-                                const unprocessedItems =
-                                  filteredHistoryData.filter(
-                                    (item) =>
-                                      isEmpty(item["col15"]) ||
-                                      (item["col15"].toString().trim() !==
-                                        "Done" &&
-                                        item["col15"].toString().trim() !==
-                                          "Not Done")
-                                  );
-                                if (e.target.checked) {
-                                  setSelectedHistoryItems(unprocessedItems);
-                                } else {
-                                  setSelectedHistoryItems([]);
-                                }
-                              }}
-                            />
-                            <span className="text-xs text-gray-400 mt-1">
-                              Admin
-                            </span>
-                          </div>
-                        </th>
-                      )}
+        {/* Admin Select Column Header */}
+        {userRole === "admin" && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+            <div className="flex flex-col items-center">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                checked={
+                  (activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).filter(
+                    (item) => {
+                      const adminDoneColumn = item._sheetType === 'delegation' ? 'col19' : 'col15';
+                      return isEmpty(item[adminDoneColumn]) ||
+                        (item[adminDoneColumn].toString().trim() !== "Done" &&
+                         item[adminDoneColumn].toString().trim() !== "Not Done");
+                    }
+                  ).length > 0 &&
+                  selectedHistoryItems.length ===
+                    (activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).filter(
+                      (item) => {
+                        const adminDoneColumn = item._sheetType === 'delegation' ? 'col19' : 'col15';
+                        return isEmpty(item[adminDoneColumn]) ||
+                          (item[adminDoneColumn].toString().trim() !== "Done" &&
+                           item[adminDoneColumn].toString().trim() !== "Not Done");
+                      }
+                    ).length
+                }
+                onChange={(e) => {
+                  const currentData = activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData;
+                  const unprocessedItems = currentData.filter((item) => {
+                    const adminDoneColumn = item._sheetType === 'delegation' ? 'col19' : 'col15';
+                    return isEmpty(item[adminDoneColumn]) ||
+                      (item[adminDoneColumn].toString().trim() !== "Done" &&
+                       item[adminDoneColumn].toString().trim() !== "Not Done");
+                  });
+                  if (e.target.checked) {
+                    setSelectedHistoryItems(unprocessedItems);
+                  } else {
+                    setSelectedHistoryItems([]);
+                  }
+                }}
+              />
+              <span className="text-xs text-gray-400 mt-1">Admin</span>
+            </div>
+          </th>
+        )}
 
-                      {/* Hide Task ID column for admin in history view */}
-                      {userRole !== "admin" && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Task ID
-                        </th>
-                      )}
+        {/* Hide Task ID column for admin in history view */}
+        {userRole !== "admin" && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+            Task ID
+          </th>
+        )}
 
-                      {/* Hide Department Name column for admin in history view */}
-                      {userRole !== "admin" && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Department Name
-                        </th>
-                      )}
+        {/* Hide Department Name column for admin in history view */}
+        {userRole !== "admin" && isAdmin && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+            Department Name
+          </th>
+        )}
 
-                      {/* Hide Given By column for admin in history view */}
-                      {userRole !== "admin" && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Given By
-                        </th>
-                      )}
+        {/* Hide Given By column for admin in history view */}
+        {userRole !== "admin" && isAdmin && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+            Given By
+          </th>
+        )}
 
-                      {/* Hide Name column for admin in history view */}
-                      {userRole !== "admin" && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Name
-                        </th>
-                      )}
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
-                        Task Description
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-50 min-w-[140px]">
-                        Task Start Date & Time
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
-                        Freq
-                      </th>
-                      {/* Hide Enable Reminders column for admin in history view */}
-                      {userRole !== "admin" && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Enable Reminders
-                        </th>
-                      )}
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                        Require Attachment
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50 min-w-[140px]">
-                        Actual Date & Time
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-blue-50 min-w-[80px]">
-                        Status
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-50 min-w-[150px]">
-                        Remarks
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                        Attachment
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredHistoryData.length > 0 ? (
-                      filteredHistoryData.map((history) => {
-                        const isInEditMode = editingRows.has(history._id);
-                        const isSaving = savingEdits.has(history._id);
+        {/* Hide Name column for admin in history view */}
+        {userRole !== "admin" && isAdmin && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+            Name
+          </th>
+        )}
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+          Task Description
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-50 min-w-[140px]">
+          Task Start Date & Time
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
+          Freq
+        </th>
+        {/* Hide Enable Reminders column for admin in history view */}
+        {userRole !== "admin" && isAdmin && (
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+            Enable Reminders
+          </th>
+        )}
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+          Require Attachment
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50 min-w-[140px]">
+          Actual Date & Time
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-blue-50 min-w-[80px]">
+          Status
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-50 min-w-[150px]">
+          Remarks
+        </th>
+        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+          Attachment
+        </th>
+      </tr>
+    </thead>
+    <tbody className="bg-white divide-y divide-gray-200">
+      {loading ? (
+        <tr>
+          <td 
+            colSpan={
+              (userRole === "admin" ? 2 : 0) + // Admin Done + Admin checkbox columns
+              (userRole !== "admin" ? 1 : 0) + // Task ID column
+              (userRole !== "admin" && isAdmin ? 3 : 0) + // Department, Given By, Name columns
+              7 + // Fixed columns (Task Description, Start Date, Freq, Require Attachment, Actual Date, Status, Remarks, Attachment)
+              (userRole !== "admin" && isAdmin ? 1 : 0) // Enable Reminders column
+            }
+            className="px-6 py-8 text-center"
+          >
+            <div className="flex flex-col items-center justify-center">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+              <p className="text-purple-600">Loading task data...</p>
+            </div>
+          </td>
+        </tr>
+      ) : (activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).length > 0 ? (
+        (activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).map((history) => {
+          const isInEditMode = editingRows.has(history._id);
+          const isSaving = savingEdits.has(history._id);
+          const adminDoneColumn = history._sheetType === 'delegation' ? 'col19' : 'col15';
 
-                        return (
-                          <tr key={history._id} className="hover:bg-gray-50">
-                            {/* FIRST: Admin Done Column with Edit functionality */}
-                            {userRole === "admin" && (
-                              <td className="px-3 py-4 bg-gray-50 min-w-[160px]">
-                                {isInEditMode ? (
-                                  // Edit mode
-                                  <div className="flex items-center space-x-2">
-                                    <select
-                                      value={
-                                        editedAdminStatus[history._id] ||
-                                        "Not Done"
-                                      }
-                                      onChange={(e) =>
-                                        setEditedAdminStatus((prev) => ({
-                                          ...prev,
-                                          [history._id]: e.target.value,
-                                        }))
-                                      }
-                                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                      disabled={isSaving}
-                                    >
-                                      <option value="Not Done">Not Done</option>
-                                      <option value="Done">Done</option>
-                                    </select>
-                                    <div className="flex space-x-1">
-                                      <button
-                                        onClick={() => handleSaveEdit(history)}
-                                        disabled={isSaving}
-                                        className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
-                                        title="Save changes"
-                                      >
-                                        {isSaving ? (
-                                          <div className="animate-spin h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full"></div>
-                                        ) : (
-                                          <Save className="h-4 w-4" />
-                                        )}
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleCancelEdit(history._id)
-                                        }
-                                        disabled={isSaving}
-                                        className="p-1 text-red-600 hover:text-red-800 disabled:opacity-50"
-                                        title="Cancel editing"
-                                      >
-                                        <XCircle className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  // Display mode
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      {!isEmpty(history["col15"]) &&
-                                      history["col15"].toString().trim() ===
-                                        "Done" ? (
-                                        <div className="flex items-center">
-                                          <div className="h-4 w-4 rounded border-gray-300 text-green-600 bg-green-100 mr-2 flex items-center justify-center">
-                                            <span className="text-xs text-green-600">
-                                              ✓
-                                            </span>
-                                          </div>
-                                          <div className="flex flex-col">
-                                            <div className="font-medium text-green-700 text-sm">
-                                              Done
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ) : !isEmpty(history["col15"]) &&
-                                        history["col15"].toString().trim() ===
-                                          "Not Done" ? (
-                                        <div className="flex items-center text-red-500 text-sm">
-                                          <div className="h-4 w-4 rounded border-gray-300 bg-red-100 mr-2 flex items-center justify-center">
-                                            <span className="text-xs text-red-600">
-                                              ✗
-                                            </span>
-                                          </div>
-                                          <span className="font-medium">
-                                            Not Done
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center text-gray-400 text-sm">
-                                          <div className="h-4 w-4 rounded border-gray-300 mr-2"></div>
-                                          <span>Pending</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                    <button
-                                      onClick={() => handleEditClick(history)}
-                                      className="p-1 text-blue-600 hover:text-blue-800 ml-2"
-                                      title="Edit admin status"
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                )}
-                              </td>
-                            )}
-
-                            {/* SECOND: Admin Select Checkbox - Hide for Done and Not Done items */}
-                            {userRole === "admin" && (
-                              <td className="px-3 py-4 w-12">
-                                {!isEmpty(history["col15"]) &&
-                                (history["col15"].toString().trim() ===
-                                  "Done" ||
-                                  history["col15"].toString().trim() ===
-                                    "Not Done") ? (
-                                  // Already processed - show status only
-                                  <div className="flex flex-col items-center">
-                                    <div
-                                      className={`h-4 w-4 rounded border-gray-300 ${
-                                        history["col15"].toString().trim() ===
-                                        "Done"
-                                          ? "text-green-600 bg-green-100"
-                                          : "text-red-600 bg-red-100"
-                                      }`}
-                                    >
-                                      <span
-                                        className={`text-xs ${
-                                          history["col15"].toString().trim() ===
-                                          "Done"
-                                            ? "text-green-600"
-                                            : "text-red-600"
-                                        }`}
-                                      >
-                                        {history["col15"].toString().trim() ===
-                                        "Done"
-                                          ? "✓"
-                                          : "✗"}
-                                      </span>
-                                    </div>
-                                    <span
-                                      className={`text-xs mt-1 text-center break-words ${
-                                        history["col15"].toString().trim() ===
-                                        "Done"
-                                          ? "text-green-600"
-                                          : "text-red-600"
-                                      }`}
-                                    >
-                                      {history["col15"].toString().trim()}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  // Not processed yet - normal selectable checkbox
-                                  <div className="flex flex-col items-center">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                                      checked={selectedHistoryItems.some(
-                                        (item) => item._id === history._id
-                                      )}
-                                      onChange={() => {
-                                        setSelectedHistoryItems((prev) =>
-                                          prev.some(
-                                            (item) => item._id === history._id
-                                          )
-                                            ? prev.filter(
-                                                (item) =>
-                                                  item._id !== history._id
-                                              )
-                                            : [...prev, history]
-                                        );
-                                      }}
-                                    />
-                                    <span className="text-xs text-gray-400 mt-1 text-center break-words">
-                                      Mark Done
-                                    </span>
-                                  </div>
-                                )}
-                              </td>
-                            )}
-
-                            {/* Rest of the columns remain the same order */}
-                            {/* Hide Task ID column for admin in history view */}
-                            {userRole !== "admin" && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm font-medium text-gray-900 break-words">
-                                  {history["col1"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Department Name column for admin in history view */}
-                            {userRole !== "admin" && isAdmin && (
-                              <td className="px-3 py-4 min-w-[120px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col2"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Given By column for admin in history view */}
-                            {userRole !== "admin" && isAdmin && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col3"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Name column for admin in history view */}
-                            {userRole !== "admin" && isAdmin && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col4"] || "—"}
-                                </div>
-                              </td>
-                            )}
-                            <td className="px-3 py-4 min-w-[200px]">
-                              <div
-                                className="text-sm text-gray-900 break-words"
-                                title={history["col5"]}
-                              >
-                                {history["col5"] || "—"}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 bg-yellow-50 min-w-[140px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col6"] ? (
-                                  <div>
-                                    <div className="font-medium break-words">
-                                      {history["col6"].includes(" ")
-                                        ? history["col6"].split(" ")[0]
-                                        : history["col6"]}
-                                    </div>
-                                    {history["col6"].includes(" ") && (
-                                      <div className="text-xs text-gray-500 break-words">
-                                        {history["col6"].split(" ")[1]}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  "—"
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 min-w-[80px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col7"] || "—"}
-                              </div>
-                            </td>
-                            {/* Hide Enable Reminders column for admin in history view */}
-                            {userRole !== "admin" && isAdmin && (
-                              <td className="px-3 py-4 min-w-[120px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col8"] || "—"}
-                                </div>
-                              </td>
-                            )}
-                            <td className="px-3 py-4 min-w-[120px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col9"] || "—"}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 bg-green-50 min-w-[140px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col10"] ? (
-                                  <div>
-                                    <div className="font-medium break-words">
-                                      {history["col10"].includes(" ")
-                                        ? history["col10"].split(" ")[0]
-                                        : history["col10"]}
-                                    </div>
-                                    {history["col10"].includes(" ") && (
-                                      <div className="text-xs text-gray-500 break-words">
-                                        {history["col10"].split(" ")[1]}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  "—"
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 bg-blue-50 min-w-[80px]">
-                              <span
-                                className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full break-words ${
-                                  history["col12"] === "Yes"
-                                    ? "bg-green-100 text-green-800"
-                                    : history["col12"] === "No"
-                                    ? "bg-red-100 text-red-800"
-                                    : "bg-gray-100 text-gray-800"
-                                }`}
-                              >
-                                {history["col12"] || "—"}
-                              </span>
-                            </td>
-                            <td className="px-3 py-4 bg-purple-50 min-w-[150px]">
-                              <div
-                                className="text-sm text-gray-900 break-words"
-                                title={history["col13"]}
-                              >
-                                {history["col13"] || "—"}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 min-w-[100px]">
-                              {history["col14"] ? (
-                                <a
-                                  href={history["col14"]}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline flex items-center break-words"
-                                >
-                                  <img
-                                    src={
-                                      history["col14"] ||
-                                      "/placeholder.svg?height=32&width=32"
-                                    }
-                                    alt="Attachment"
-                                    className="h-8 w-8 object-cover rounded-md mr-2 flex-shrink-0"
-                                  />
-                                  <span className="break-words">View</span>
-                                </a>
-                              ) : (
-                                <span className="text-gray-400">
-                                  No attachment
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        {/* Update colspan calculation based on hidden columns and new order */}
-                        <td
-                          colSpan={
-                            (userRole === "admin" ? 1 : 0) + // Admin Done column (now first)
-                            (userRole === "admin" ? 1 : 0) + // Admin checkbox column (now second)
-                            (userRole !== "admin" ? 1 : 0) + // Task ID column
-                            (userRole !== "admin" && isAdmin ? 1 : 0) + // Department Name column
-                            (userRole !== "admin" && isAdmin ? 1 : 0) + // Given By column
-                            (userRole !== "admin" && isAdmin ? 1 : 0) + // Name column
-                            7 + // Fixed columns (Task Description, Task Start Date, Freq, Require Attachment, Actual Date, Status, Remarks, Attachment)
-                            (userRole !== "admin" && isAdmin ? 1 : 0) // Enable Reminders column
-                          }
-                          className="px-6 py-4 text-center text-gray-500"
+          return (
+            <tr key={history._id} className="hover:bg-gray-50">
+              {/* FIRST: Admin Done Column with Edit functionality */}
+              {userRole === "admin" && (
+                <td className="px-3 py-4 bg-gray-50 min-w-[160px]">
+                  {isInEditMode ? (
+                    <div className="flex items-center space-x-2">
+                      <select
+                        value={editedAdminStatus[history._id] || "Not Done"}
+                        onChange={(e) =>
+                          setEditedAdminStatus((prev) => ({
+                            ...prev,
+                            [history._id]: e.target.value,
+                          }))
+                        }
+                        className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isSaving}
+                      >
+                        <option value="Not Done">Not Done</option>
+                        <option value="Done">Done</option>
+                      </select>
+                      <div className="flex space-x-1">
+                        <button
+                          onClick={() => handleSaveEdit(history)}
+                          disabled={isSaving}
+                          className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
+                          title="Save changes"
                         >
-                          {searchTerm ||
-                          selectedMembers.length > 0 ||
-                          startDate ||
-                          endDate
-                            ? "No historical records matching your filters"
-                            : "No completed records found"}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          {isSaving ? (
+                            <div className="animate-spin h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full"></div>
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleCancelEdit(history._id)}
+                          disabled={isSaving}
+                          className="p-1 text-red-600 hover:text-red-800 disabled:opacity-50"
+                          title="Cancel editing"
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        {!isEmpty(history[adminDoneColumn]) &&
+                        history[adminDoneColumn].toString().trim() === "Done" ? (
+                          <div className="flex items-center">
+                            <div className="h-4 w-4 rounded border-gray-300 text-green-600 bg-green-100 mr-2 flex items-center justify-center">
+                              <span className="text-xs text-green-600">✓</span>
+                            </div>
+                            <div className="flex flex-col">
+                              <div className="font-medium text-green-700 text-sm">Done</div>
+                            </div>
+                          </div>
+                        ) : !isEmpty(history[adminDoneColumn]) &&
+                          history[adminDoneColumn].toString().trim() === "Not Done" ? (
+                          <div className="flex items-center text-red-500 text-sm">
+                            <div className="h-4 w-4 rounded border-gray-300 bg-red-100 mr-2 flex items-center justify-center">
+                              <span className="text-xs text-red-600">✗</span>
+                            </div>
+                            <span className="font-medium">Not Done</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-gray-400 text-sm">
+                            <div className="h-4 w-4 rounded border-gray-300 mr-2"></div>
+                            <span>Pending</span>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleEditClick(history)}
+                        className="p-1 text-blue-600 hover:text-blue-800 ml-2"
+                        title="Edit admin status"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </td>
+              )}
+
+              {/* SECOND: Admin Select Checkbox */}
+              {userRole === "admin" && (
+                <td className="px-3 py-4 w-12">
+                  {!isEmpty(history[adminDoneColumn]) &&
+                  (history[adminDoneColumn].toString().trim() === "Done" ||
+                    history[adminDoneColumn].toString().trim() === "Not Done") ? (
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`h-4 w-4 rounded border-gray-300 ${
+                          history[adminDoneColumn].toString().trim() === "Done"
+                            ? "text-green-600 bg-green-100"
+                            : "text-red-600 bg-red-100"
+                        }`}
+                      >
+                        <span
+                          className={`text-xs ${
+                            history[adminDoneColumn].toString().trim() === "Done"
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {history[adminDoneColumn].toString().trim() === "Done" ? "✓" : "✗"}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-xs mt-1 text-center break-words ${
+                          history[adminDoneColumn].toString().trim() === "Done"
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {history[adminDoneColumn].toString().trim()}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        checked={selectedHistoryItems.some(item => item._id === history._id)}
+                        onChange={() => {
+                          setSelectedHistoryItems(prev =>
+                            prev.some(item => item._id === history._id)
+                              ? prev.filter(item => item._id !== history._id)
+                              : [...prev, history]
+                          );
+                        }}
+                      />
+                      <span className="text-xs text-gray-400 mt-1 text-center break-words">
+                        Mark Done
+                      </span>
+                    </div>
+                  )}
+                </td>
+              )}
+
+              {/* Rest of the columns - Task ID, Department, etc. */}
+              {userRole !== "admin" && (
+                <td className="px-3 py-4 min-w-[100px]">
+                  <div className="text-sm font-medium text-gray-900 break-words">
+                    {history["col1"] || "—"}
+                  </div>
+                </td>
+              )}
+
+              {userRole !== "admin" && isAdmin && (
+                <td className="px-3 py-4 min-w-[120px]">
+                  <div className="text-sm text-gray-900 break-words">
+                    {history["col2"] || "—"}
+                  </div>
+                </td>
+              )}
+
+              {userRole !== "admin" && isAdmin && (
+                <td className="px-3 py-4 min-w-[100px]">
+                  <div className="text-sm text-gray-900 break-words">
+                    {history["col3"] || "—"}
+                  </div>
+                </td>
+              )}
+
+              {userRole !== "admin" && isAdmin && (
+                <td className="px-3 py-4 min-w-[100px]">
+                  <div className="text-sm text-gray-900 break-words">
+                    {history["col4"] || "—"}
+                  </div>
+                </td>
+              )}
+              
+              <td className="px-3 py-4 min-w-[200px]">
+                <div className="text-sm text-gray-900 break-words" title={history["col5"]}>
+                  {history["col5"] || "—"}
+                </div>
+              </td>
+              
+              <td className="px-3 py-4 bg-yellow-50 min-w-[140px]">
+                <div className="text-sm text-gray-900 break-words">
+                  {history["col6"] ? (
+                    <div>
+                      <div className="font-medium break-words">
+                        {history["col6"].includes(" ") ? history["col6"].split(" ")[0] : history["col6"]}
+                      </div>
+                      {history["col6"].includes(" ") && (
+                        <div className="text-xs text-gray-500 break-words">
+                          {history["col6"].split(" ")[1]}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </td>
+              
+              <td className="px-3 py-4 min-w-[80px]">
+                <div className="text-sm text-gray-900 break-words">
+                  {history["col7"] || "—"}
+                </div>
+              </td>
+              
+              {userRole !== "admin" && isAdmin && (
+                <td className="px-3 py-4 min-w-[120px]">
+                  <div className="text-sm text-gray-900 break-words">
+                    {history["col8"] || "—"}
+                  </div>
+                </td>
+              )}
+              
+              <td className="px-3 py-4 min-w-[120px]">
+                <div className="text-sm text-gray-900 break-words">
+                  {history["col9"] || "—"}
+                </div>
+              </td>
+              
+              <td className="px-3 py-4 bg-green-50 min-w-[140px]">
+                <div className="text-sm text-gray-900 break-words">
+                  {history["col10"] ? (
+                    <div>
+                      <div className="font-medium break-words">
+                        {history["col10"].includes(" ") ? history["col10"].split(" ")[0] : history["col10"]}
+                      </div>
+                      {history["col10"].includes(" ") && (
+                        <div className="text-xs text-gray-500 break-words">
+                          {history["col10"].split(" ")[1]}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </td>
+              
+              <td className="px-3 py-4 bg-blue-50 min-w-[80px]">
+                <span
+                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full break-words ${
+                    history["col12"] === "Yes"
+                      ? "bg-green-100 text-green-800"
+                      : history["col12"] === "No"
+                      ? "bg-red-100 text-red-800"
+                      : "bg-gray-100 text-gray-800"
+                  }`}
+                >
+                  {history["col12"] || "—"}
+                </span>
+              </td>
+              
+              <td className="px-3 py-4 bg-purple-50 min-w-[150px]">
+                <div className="text-sm text-gray-900 break-words" title={history["col13"]}>
+                  {history["col13"] || "—"}
+                </div>
+              </td>
+              
+              <td className="px-3 py-4 min-w-[100px]">
+                {history["col14"] ? (
+                  
+                   <a href={history["col14"]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline flex items-center break-words"
+                  >
+                    <img
+                      src={history["col14"] || "/placeholder.svg?height=32&width=32"}
+                      alt="Attachment"
+                      className="h-8 w-8 object-cover rounded-md mr-2 flex-shrink-0"
+                    />
+                    <span className="break-words">View</span>
+                  </a>
+                ) : (
+                  <span className="text-gray-400">No attachment</span>
+                )}
+              </td>
+            </tr>
+          );
+        })
+      ) : (
+        <tr>
+          <td 
+            colSpan={
+              (userRole === "admin" ? 2 : 0) + // Admin Done + Admin checkbox columns
+              (userRole !== "admin" ? 1 : 0) + // Task ID column
+              (userRole !== "admin" && isAdmin ? 3 : 0) + // Department, Given By, Name columns
+              7 + // Fixed columns
+              (userRole !== "admin" && isAdmin ? 1 : 0) // Enable Reminders column
+            }
+            className="px-6 py-4 text-center text-gray-500"
+          >
+            {searchTerm || selectedMembers.length > 0 || startDate || endDate
+              ? "No historical records matching your filters"
+              : `No completed ${activeApprovalTab} records found`}
+          </td>
+        </tr>
+      )}
+    </tbody>
+  </table>
+</div>
 
               {/* Mobile Card View */}
               <div className="sm:hidden space-y-4 p-4 max-h-[calc(100vh-300px)] overflow-auto">
@@ -1712,6 +1792,7 @@ function Approval() {
             </>
           )}
         </div>
+      </div>
       </div>
     </AdminLayout>
   );
