@@ -313,45 +313,74 @@ export default function AssignTask() {
     fetchMasterSheetOptions();
   }, []);
 
-  // Add a function to get the last task ID from the specified sheet
-  const getLastTaskId = async (sheetName) => {
-    try {
-      const url = `https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
-        sheetName
-      )}`;
+// Add a function to get the last task ID from the specified sheet
+const getLastTaskId = async (sheetName) => {
+  try {
+    const sheetId = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
+    
+    // Try with the provided sheet name first, then try alternate case
+    const sheetNamesToTry = [
+      sheetName,
+      sheetName.toUpperCase(),
+      sheetName.toLowerCase(),
+      sheetName.charAt(0).toUpperCase() + sheetName.slice(1).toLowerCase()
+    ];
+    
+    let data = null;
+    let successfulSheetName = null;
+    
+    for (const trySheetName of sheetNamesToTry) {
+      try {
+        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
+          trySheetName
+        )}`;
 
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch sheet data: ${response.status}`);
-      }
+        const response = await fetch(url);
+        if (!response.ok) continue;
 
-      const text = await response.text();
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const jsonString = text.substring(jsonStart, jsonEnd + 1);
-      const data = JSON.parse(jsonString);
-
-      if (!data.table || !data.table.rows || data.table.rows.length === 0) {
-        return 0; // Start from 1 if no tasks exist
-      }
-
-      // Get the last task ID from column B (index 1)
-      let lastTaskId = 0;
-      data.table.rows.forEach((row) => {
-        if (row.c && row.c[1] && row.c[1].v) {
-          const taskId = parseInt(row.c[1].v);
-          if (!isNaN(taskId) && taskId > lastTaskId) {
-            lastTaskId = taskId;
-          }
+        const text = await response.text();
+        const jsonStart = text.indexOf("{");
+        const jsonEnd = text.lastIndexOf("}");
+        const jsonString = text.substring(jsonStart, jsonEnd + 1);
+        data = JSON.parse(jsonString);
+        
+        if (data.table && data.table.rows) {
+          successfulSheetName = trySheetName;
+          break;
         }
-      });
-
-      return lastTaskId;
-    } catch (error) {
-      console.error("Error fetching last task ID:", error);
-      return 0;
+      } catch (e) {
+        continue;
+      }
     }
-  };
+
+    if (!data || !data.table || !data.table.rows || data.table.rows.length <= 1) {
+      console.log(`No existing tasks found in sheet, starting from ID 1`);
+      return 0; // Start from 1 if no tasks exist (only header row)
+    }
+
+    console.log(`Successfully fetched data from sheet: ${successfulSheetName}`);
+
+    // Get the last task ID from column B (index 1)
+    let lastTaskId = 0;
+    // Skip the first row (header) by starting from index 1
+    for (let i = 1; i < data.table.rows.length; i++) {
+      const row = data.table.rows[i];
+      if (row.c && row.c[1] && row.c[1].v) {
+        const taskIdValue = row.c[1].v.toString().trim();
+        const taskId = parseInt(taskIdValue);
+        if (!isNaN(taskId) && taskId > lastTaskId) {
+          lastTaskId = taskId;
+        }
+      }
+    }
+
+    console.log(`Last Task ID in ${successfulSheetName}: ${lastTaskId}`);
+    return lastTaskId;
+  } catch (error) {
+    console.error("Error fetching last task ID:", error);
+    return 0;
+  }
+};
 
   // UPDATED: Date formatting function to return DD/MM/YYYY format (for working days comparison)
   const formatDateToDDMMYYYY = (date) => {
@@ -632,98 +661,98 @@ export default function AssignTask() {
   };
 
   // UPDATED: handleSubmit function with department-specific sheet logic
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsSubmitting(true);
+ // UPDATED: handleSubmit function with department-specific sheet logic
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setIsSubmitting(true);
 
-    try {
-      if (generatedTasks.length === 0) {
-        alert("Please generate tasks first by clicking Preview Generated Tasks");
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Validate that department is selected
-      if (!formData.department || formData.department.trim() === "") {
-        alert("Please select a department before submitting tasks");
-        setIsSubmitting(false);
-        return;
-      }
-
-      // NEW: Determine the sheet based on department and frequency:
-      // - "one-time" frequency → DELEGATION sheet (department doesn't matter)
-      // - All other frequencies → Department-specific sheet (using department name as sheet name)
-      let submitSheetName;
-
-      if (formData.frequency === "one-time") {
-        submitSheetName = "DELEGATION";
-      } else {
-        // Use the selected department name as the sheet name
-        submitSheetName = "Unique";
-      }
-
-      // console.log(`Selected department: ${formData.department}`);
-      // console.log(`Target sheet: ${submitSheetName}`);
-
-      // Get the last task ID from the appropriate sheet
-      const lastTaskId = await getLastTaskId(submitSheetName);
-      let nextTaskId = lastTaskId + 1;
-
-      // Prepare all tasks data for batch insertion
-      const tasksData = generatedTasks.map((task, index) => ({
-        timestamp: getCurrentTimestamp(), // FIXED: Use current timestamp with actual time
-        taskId: (nextTaskId + index).toString(),
-        department: task.department,                  // Maps to Column C
-        givenBy: task.givenBy,                    // Maps to Column D
-        name: task.doer,                          // Maps to Column E
-        description: task.description,            // Maps to Column F
-        startDate: task.dueDate,                  // Maps to Column G - now in DD/MM/YYYY HH:MM:SS format
-        freq: task.frequency,                     // Maps to Column H
-        enableReminders: task.enableReminders ? "Yes" : "No",    // Maps to Column I
-        requireAttachment: task.requireAttachment ? "Yes" : "No"  // Maps to Column J
-      }));
-
-      // console.log(`Submitting ${tasksData.length} tasks in batch to ${submitSheetName} sheet:`, tasksData);
-
-      // Submit all tasks in one batch to Google Sheets
-      const formPayload = new FormData();
-      formPayload.append("sheetName", submitSheetName);
-      formPayload.append("action", "insert");
-      formPayload.append("batchInsert", "true");
-      formPayload.append("rowData", JSON.stringify(tasksData));
-
-      await fetch(
-        "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec",
-        {
-          method: "POST",
-          body: formPayload,
-          mode: "no-cors",
-        }
-      );
-
-      alert(`Successfully submitted ${generatedTasks.length} task${generatedTasks.length !== 1 ? 's' : ''} to ${submitSheetName} sheet!`);
-      // Reset form
-      setFormData({
-        department: "",
-        givenBy: "",
-        doer: "",
-        description: "",
-        frequency: "one-time",
-        enableReminders: true,
-        requireAttachment: false
-      });
-      setSelectedDate(null);
-      setTime("09:00"); // Reset time to default
-      setGeneratedTasks([]);
-      setAccordionOpen(false);
-    } catch (error) {
-      console.error("Submission error:", error);
-      alert("Failed to assign tasks. Please try again.");
-    } finally {
+  try {
+    if (generatedTasks.length === 0) {
+      alert("Please generate tasks first by clicking Preview Generated Tasks");
       setIsSubmitting(false);
+      return;
     }
-  };
 
+    // Validate that department is selected
+    if (!formData.department || formData.department.trim() === "") {
+      alert("Please select a department before submitting tasks");
+      setIsSubmitting(false);
+      return;
+    }
+
+    // NEW: Determine the sheet based on department and frequency:
+    // - "one-time" frequency → DELEGATION sheet (department doesn't matter)
+    // - All other frequencies → Department-specific sheet (using department name as sheet name)
+    let submitSheetName;
+
+    if (formData.frequency === "one-time") {
+      submitSheetName = "DELEGATION";
+    } else {
+      // Use the selected department name as the sheet name
+      submitSheetName = "Unique";
+    }
+
+    // console.log(`Selected department: ${formData.department}`);
+    // console.log(`Target sheet: ${submitSheetName}`);
+
+    // Get the last task ID from the appropriate sheet
+    const lastTaskId = await getLastTaskId(submitSheetName);
+    let nextTaskId = lastTaskId + 1;
+
+    // Prepare all tasks data for batch insertion
+    const tasksData = generatedTasks.map((task, index) => ({
+      timestamp: getCurrentTimestamp(), // FIXED: Use current timestamp with actual time
+      taskId: (nextTaskId + index).toString(),
+      department: formData.department,              // FIXED: Use formData.department instead of task.department
+      givenBy: formData.givenBy,                    // FIXED: Use formData.givenBy instead of task.givenBy
+      name: formData.doer,                          // FIXED: Use formData.doer instead of task.doer
+      description: task.description,                // Maps to Column F
+      startDate: task.dueDate,                      // Maps to Column G - now in DD/MM/YYYY HH:MM:SS format
+      freq: task.frequency,                         // Maps to Column H
+      enableReminders: task.enableReminders ? "Yes" : "No",    // Maps to Column I
+      requireAttachment: task.requireAttachment ? "Yes" : "No"  // Maps to Column J
+    }));
+
+    // console.log(`Submitting ${tasksData.length} tasks in batch to ${submitSheetName} sheet:`, tasksData);
+
+    // Submit all tasks in one batch to Google Sheets
+    const formPayload = new FormData();
+    formPayload.append("sheetName", submitSheetName);
+    formPayload.append("action", "insert");
+    formPayload.append("batchInsert", "true");
+    formPayload.append("rowData", JSON.stringify(tasksData));
+
+    await fetch(
+      "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec",
+      {
+        method: "POST",
+        body: formPayload,
+        mode: "no-cors",
+      }
+    );
+
+    alert(`Successfully submitted ${generatedTasks.length} task${generatedTasks.length !== 1 ? 's' : ''} to ${submitSheetName} sheet!`);
+    // Reset form
+    setFormData({
+      department: "",
+      givenBy: "",
+      doer: "",
+      description: "",
+      frequency: "one-time",
+      enableReminders: true,
+      requireAttachment: false
+    });
+    setSelectedDate(null);
+    setTime("09:00"); // Reset time to default
+    setGeneratedTasks([]);
+    setAccordionOpen(false);
+  } catch (error) {
+    console.error("Submission error:", error);
+    alert("Failed to assign tasks. Please try again.");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
   // Helper function to format date for display in preview
   const formatDateForDisplay = (dateTimeStr) => {
     // dateTimeStr is in format "DD/MM/YYYY HH:MM:SS"

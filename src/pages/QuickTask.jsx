@@ -309,6 +309,8 @@ const submitSelectedTasks = async () => {
   }, []);
 // **COMPLETE CORRECTED fetchChecklistData function** - Replace your entire fetchChecklistData function:
 
+// Update the fetchChecklistData function - find this section and replace:
+
 const fetchChecklistData = useCallback(async () => {
   if (!currentUser || userLoading) return;
 
@@ -328,12 +330,12 @@ const fetchChecklistData = useCallback(async () => {
     if (data?.table?.rows) {
       const rows = data.table.rows.slice(1); // Skip header
 
-      // Map columns according to your specification (C-J from Checklist sheet)
+      // Map columns according to your specification (B-J from Checklist sheet)
       const transformedData = rows.map((row, rowIndex) => {
         const baseData = {
           _id: `checklist_${rowIndex}_${Math.random().toString(36).substring(2, 15)}`,
           _rowIndex: rowIndex + 2,
-          // Mapping columns C-J from Checklist sheet - RAW VALUES NO FORMATTING
+          'Task ID': row.c[1]?.v || "",           // Column B - Task ID FROM SHEET
           Department: row.c[2]?.v || "",          // Column C - Department
           'Given By': row.c[3]?.v || "",          // Column D - Given By
           Name: row.c[4]?.v || "",                // Column E - Name
@@ -384,7 +386,6 @@ const fetchChecklistData = useCallback(async () => {
     setLoading(false);
   }
 }, [currentUser, userRole, userLoading]);
-
 
   const fetchDelegationData = useCallback(async () => {
     if (!currentUser || userLoading) return;
@@ -857,9 +858,10 @@ const fetchChecklistData = useCallback(async () => {
                     />
                   </td>
                      {/* NEW Task ID column */}
-          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold ">
-            {task._rowIndex || 'N/A'}
-          </td>
+         {/* Task ID column - display from sheet */}
+<td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-green-50">
+  {task['Task ID'] || 'N/A'}
+</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {isEditing ? (
                       <input
