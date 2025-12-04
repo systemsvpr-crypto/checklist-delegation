@@ -20,7 +20,7 @@ const CONFIG = {
     "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec",
 
   // Google Drive folder ID for file uploads
-  DRIVE_FOLDER_ID: "1LPsmRqzqvp6b7aY9FS1NfiiK0LV03v03",
+  DRIVE_FOLDER_ID: "1fXEND0ZE-DFTSadzFWgD6hw-KMemdlWv",
 
   // Sheet names
   SOURCE_SHEET_NAME: "DELEGATION",
