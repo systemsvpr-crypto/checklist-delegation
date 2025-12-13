@@ -1480,24 +1480,26 @@ const [activeApprovalTab, setActiveApprovalTab] = useState('checklist');
                 </div>
               </td>
               
-              <td className="px-3 py-4 min-w-[100px]">
-                {history["col14"] ? (
-                  
-                   <a href={history["col14"]}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 underline flex items-center break-words"
-                  >
-                    <img
-                      src={history["col14"] || "/placeholder.svg?height=32&width=32"}
-                      alt="Attachment"
-                      className="h-8 w-8 object-cover rounded-md mr-2 flex-shrink-0"
-                    />
-                    <span className="break-words">View</span>
-                  </a>
-                ) : (
-                  <span className="text-gray-400">No attachment</span>
-                )}
+               <td className="px-3 py-4 min-w-[100px]">
+                {(() => {
+                  const attachmentCol = history._sheetType === 'delegation' ? history["col15"] : history["col14"];
+                  return attachmentCol ? (
+                    <a href={attachmentCol}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 underline flex items-center break-words"
+                    >
+                      {/* <img
+                        src={attachmentCol || "/placeholder.svg?height=32&width=32"}
+                        alt="Attachment"
+                        className="h-8 w-8 object-cover rounded-md mr-2 flex-shrink-0"
+                      /> */}
+                      <span className="break-words">View</span>
+                    </a>
+                  ) : (
+                    <span className="text-gray-400">No attachment</span>
+                  );
+                })()}
               </td>
             </tr>
           );
