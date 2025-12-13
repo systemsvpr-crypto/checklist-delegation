@@ -193,7 +193,7 @@ export default function AssignTask() {
   // Function to fetch options from master sheet
   const fetchMasterSheetOptions = async () => {
     try {
-      const masterSheetId = "1T6F0MMLbJALv79ka8hdr-Oo_Jtjn9oXT7PLMdq_jGB8";
+      const masterSheetId = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
       const masterSheetName = "master";
 
       const url = `https://docs.google.com/spreadsheets/d/${masterSheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
@@ -316,7 +316,7 @@ export default function AssignTask() {
 // Add a function to get the last task ID from the specified sheet
 const getLastTaskId = async (sheetName) => {
   try {
-    const sheetId = "1T6F0MMLbJALv79ka8hdr-Oo_Jtjn9oXT7PLMdq_jGB8";
+    const sheetId = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
     
     // Try with the provided sheet name first, then try alternate case
     const sheetNamesToTry = [
@@ -394,7 +394,7 @@ const getLastTaskId = async (sheetName) => {
   // Function to fetch working days from the Working Day Calendar sheet
   const fetchWorkingDays = async () => {
     try {
-      const sheetId = "1T6F0MMLbJALv79ka8hdr-Oo_Jtjn9oXT7PLMdq_jGB8";
+      const sheetId = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
       const sheetName = "Working Day Calendar";
 
       const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
@@ -682,7 +682,7 @@ const handleSubmit = async (e) => {
     // Helper function to check if this is the first task for the user
     const isFirstTaskForUser = async (doerName) => {
       try {
-        const sheetId = "1T6F0MMLbJALv79ka8hdr-Oo_Jtjn9oXT7PLMdq_jGB8";
+        const sheetId = "1gNtEDmeK8hdcg1NJ-N2Em8lrrVAjCB3aSPO9Lubvq94";
         const sheetName = "Checklist";
 
         const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
@@ -789,7 +789,7 @@ const handleSubmit = async (e) => {
       formPayload.append("rowData", JSON.stringify(tasksData));
 
       await fetch(
-        "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec",
+        "https://script.google.com/macros/s/AKfycbyPJT9aAXFq9A3Z0S3PCZTd8OhT5jdDXYjhkftgLVlWKadfH5ACcWx8AODGesaA4yeuLQ/exec",
         {
           method: "POST",
           body: formPayload,
