@@ -26,8 +26,8 @@ const TrainingVideo  = () => {
 
     // Different video URLs for admin and user
     const videoUrls = {
-        admin: "https://www.youtube.com/watch?v=v2yqJc1CKBA", // Admin video
-        user: "https://youtu.be/UL-EZE3c_pA"   // User video
+        admin: "https://youtu.be/Ia_0Xj2ysRE?si=9i7Pz5A6FEa4i7c9", // Admin video
+        user: "https://youtu.be/QRakbr1TcNA"   // User video
     };
 
     const currentVideoUrl = videoUrls[userRole] || videoUrls.user;
